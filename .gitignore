@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Conda
+.python-version
+
+# Data (按需放行)
+data/pdfs/
+data/extracted/
+data/structured/
+data/processed/
+
+# Models (大文件)
+models/
+
+# IDE
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env

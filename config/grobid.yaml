@@ -1,0 +1,10 @@
+grobid:
+  url: "https://kermitt2-grobid.hf.space"
+  timeout: 120
+  retry: 3
+  sleep_between: 5
+
+paths:
+  pdf_input: "data/pdfs"
+  xml_output: "data/extracted"
+  txt_output: "data/extracted"
