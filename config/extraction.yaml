@@ -59,3 +59,65 @@ fields:
     label: 是否有含氟单体结构
   - key: synthesis_mode
     label: 均相合成还是异相合成
+
+# MiniMax API 配置
+minimax:
+  api_base: "https://api.minimax.chat/v1"
+  model: "MiniMax-M2.7"
+  temperature: 0.3
+  max_tokens: 4096
+  max_input_chars: 8000     # 单篇截取前 N 字符，控制上下文大小
+  retry: 3
+  sleep_between: 3          # 请求间隔(秒)，避免被限流
+
+# 路径配置
+paths:
+  txt_input: "data/extracted"
+  yaml_output: "data/structured"
+  db_path: "data/fluorofilm.db"
+
+# 21 个提取字段定义
+# LLM 按此顺序输出 YAML，key 为字段标识，label 为中文说明
+fields:
+  - key: journal
+    label: 期刊名称
+  - key: system
+    label: 研究体系
+  - key: conclusion_1
+    label: 关键结论1
+  - key: conclusion_2
+    label: 关键结论2
+  - key: conclusion_3
+    label: 关键结论3
+  - key: methods
+    label: 实验与表征方法
+  - key: reagent
+    label: 原料试剂名称（实际化学名称）
+  - key: catalyst
+    label: 催化剂名称
+  - key: solvent
+    label: 溶剂名称
+  - key: innovation
+    label: 创新点
+  - key: film_crystallinity_fluorine
+    label: 是否成膜、结晶性如何、是否有氟
+  - key: reaction_temperature
+    label: 反应温度（含单位）
+  - key: schiff_base_kinetics
+    label: 醛胺缩合反应动力学、界面组装过程、成膜关键步骤
+  - key: fluorine_effects
+    label: 氟含量/取代位点对结晶性、成膜性、缺陷密度、孔径、表面能、堆积方式的影响
+  - key: adsorption_mechanism
+    label: π-π作用、F-F相互作用、疏水作用、孔径筛分、氢键作用等在吸附过程中的贡献
+  - key: computational_methods
+    label: DFT计算的方法、基组、力场、模拟参数
+  - key: interface_type
+    label: 成膜界面类型（气-液/液-液/固-液）、基底性质、界面张力
+  - key: annealing_conditions
+    label: 退火温度与反应时间
+  - key: synthesis_route
+    label: 合成路线
+  - key: fluorine_monomer
+    label: 是否有含氟单体结构
+  - key: synthesis_mode
+    label: 均相合成还是异相合成
