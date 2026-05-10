@@ -13,6 +13,7 @@ data/pdfs/
 data/extracted/
 data/structured/
 data/processed/
+data/tmp/
 
 # Models (大文件)
 models/

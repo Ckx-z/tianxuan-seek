@@ -16,6 +16,9 @@ import sys
 
 import numpy as np
 import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+from rdkit.Chem.inchi import MolToInchiKey
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,8 +33,6 @@ logger = setup_logger("screen_2d")
 
 def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
     """从 LLM 数据提取 2D COF 可用单体 (≥2 官能团)，按 Canonical SMILES 去重。"""
-    from rdkit import Chem
-
     with open(llm_path, "r", encoding="utf-8") as f:
         records = json.load(f)
 
@@ -125,7 +126,6 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
         return df
 
     # 计算分子量和拓扑类型
-    from rdkit.Chem import Descriptors
     mols = [Chem.MolFromSmiles(s) for s in df["smiles"]]
     df["mw"] = [Descriptors.MolWt(m) if m else 0 for m in mols]
 
@@ -180,6 +180,8 @@ def _is_2d_topology(label: str) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="路线 A 单体筛选 — 2D COF")
     parser.add_argument("--llm", default="data/processed/monomer_smiles_llm.json")
+    parser.add_argument("--extra-monomers", default=None,
+                       help="额外单体 CSV (如商业单体), columns: smiles,name,monomer_type,has_fluorine,n_f_atoms,n_aldehyde,n_amine")
     parser.add_argument("--model-dir", default="models/v1.0")
     parser.add_argument("--cache", default="data/processed/monomer_smiles_cache.json")
     parser.add_argument("--output", default="data/processed/route_a_top20.csv")
@@ -198,6 +200,79 @@ def main():
     if len(monomers) == 0:
         logger.error("未提取到任何 2D 可用单体")
         sys.exit(1)
+
+    # 1b. 合并额外单体 (如商业单体)
+    if args.extra_monomers and os.path.exists(args.extra_monomers):
+        extra = pd.read_csv(args.extra_monomers, encoding="utf-8-sig")
+        extra_2d = extra[extra["n_aldehyde"] >= 2] if "n_aldehyde" in extra.columns else extra
+        extra_2d = extra_2d[extra_2d["monomer_type"].isin(["aldehyde", "amine", "aldehyde-amine"])]
+
+        exist_inchi = {}
+        for smi in monomers["smiles"]:
+            try:
+                mol = Chem.MolFromSmiles(smi)
+                if mol:
+                    exist_inchi[MolToInchiKey(mol)] = smi
+            except Exception:
+                pass
+
+        new_rows = []
+        dup_n = 0
+        for _, row in extra_2d.iterrows():
+            smi = row["smiles"]
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+            try:
+                inchi = MolToInchiKey(mol)
+            except Exception:
+                inchi = smi
+            if inchi in exist_inchi:
+                dup_n += 1
+                continue
+            exist_inchi[inchi] = smi
+
+            n_ald = int(row.get("n_aldehyde", 0))
+            n_am = int(row.get("n_amine", 0))
+            mtype = row["monomer_type"]
+            is_ald = mtype in ("aldehyde", "aldehyde-amine") and n_ald >= 2
+            is_am = mtype in ("amine", "aldehyde-amine") and n_am >= 2
+            dual = mtype == "aldehyde-amine" and n_ald >= 2 and n_am >= 2
+
+            mw = Descriptors.MolWt(mol)
+
+            def _topo(n_al, n_am_):
+                if n_al >= 3: return "C3"
+                elif n_al >= 2: return "C2"
+                elif n_am_ >= 4: return "C4"
+                elif n_am_ >= 3: return "C3"
+                elif n_am_ >= 2: return "C2"
+                return "?"
+
+            new_rows.append({
+                "smiles": smi,
+                "best_name": row.get("name", "?"),
+                "name": row.get("name", "?"),
+                "monomer_type": mtype,
+                "has_fluorine": bool(row.get("has_fluorine", False)),
+                "n_f_atoms": int(row.get("n_f_atoms", 0)),
+                "has_cf3": bool(row.get("has_cf3", False)),
+                "n_aldehyde": n_ald,
+                "n_amine": n_am,
+                "n_papers": int(row.get("n_papers", 0)),
+                "source": row.get("source", "extra"),
+                "is_aldehyde": is_ald or dual,
+                "is_amine": is_am or dual,
+                "is_dual": dual,
+                "mw": mw,
+                "topology": _topo(n_ald if is_ald else 0, n_am if is_am else 0),
+            })
+
+        if new_rows:
+            extra_df = pd.DataFrame(new_rows)
+            monomers = pd.concat([monomers, extra_df], ignore_index=True)
+            logger.info(f"合并额外单体: {len(new_rows)} 新增, {dup_n} InChI重复")
+            logger.info(f"合并后总单体: {len(monomers)}")
 
     # 2. 分组
     aldehydes = monomers[monomers["is_aldehyde"]]
@@ -254,7 +329,6 @@ def main():
         sys.exit(1)
 
     # 加载训练集配对 (aldehyde_smiles, amine_smiles)，严格排除已见组合
-    from rdkit import Chem
 
     meta_path = os.path.join(os.path.dirname(args.output), "label_metadata.csv")
     if os.path.exists(meta_path):
@@ -297,7 +371,6 @@ def main():
     feature_eng = FeatureEngineer(monomer_lib)
 
     import pickle
-    from rdkit import Chem
 
     with open(model_path, "rb") as f:
         model = pickle.load(f)
@@ -382,7 +455,6 @@ def main():
     valid = pairs_df.dropna(subset=["margin"])
 
     # 按 (aldehyde_inchi, amine_inchi) 去重（InChI Key 处理互变异构体），保留最高 margin
-    from rdkit.Chem.inchi import MolToInchiKey
 
     def _inchi_key(smi):
         try:
