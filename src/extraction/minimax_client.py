@@ -54,17 +54,44 @@ def load_extraction_config(config_path: str = "config/extraction.yaml") -> dict:
 
 
 def create_minimax_client(config: dict) -> MiniMaxClient:
-    """根据配置创建 MiniMaxClient 实例"""
-    api_key = os.getenv("MINIMAX_API_KEY")
+    """根据配置创建 MiniMaxClient 实例。
+
+    API key 优先级：环境变量 MINIMAX_API_KEY > config 中的 api_key 字段。
+    """
+    mc = config["minimax"]
+    api_key = mc.get("api_key", "") or os.getenv("MINIMAX_API_KEY")
     if not api_key:
         raise ValueError(
-            "环境变量 MINIMAX_API_KEY 未设置，请先 export MINIMAX_API_KEY='your-key'"
+            "环境变量 MINIMAX_API_KEY 未设置，且配置中无 api_key 字段"
         )
-    mc = config["minimax"]
     return MiniMaxClient(
         api_key=api_key,
         base_url=mc["api_base"],
         model=mc["model"],
         temperature=mc.get("temperature", 0.3),
         max_tokens=mc.get("max_tokens", 4096),
+    )
+
+
+def create_fallback_client(config: dict) -> Optional[MiniMaxClient]:
+    """根据配置创建备用 LLM 客户端（MiMo 等）。
+
+    API key 优先级：环境变量 FALLBACK_API_KEY > config 中的 api_key 字段。
+    若配置中无 fallback 段，返回 None。
+    """
+    fb = config.get("fallback")
+    if not fb:
+        return None
+    api_key = (os.getenv("FALLBACK_API_KEY")
+               or fb.get("api_key", "")
+               or os.getenv("MINIMAX_API_KEY", ""))
+    if not api_key:
+        logger.warning("备用 LLM 未配置 API key，跳过")
+        return None
+    return MiniMaxClient(
+        api_key=api_key,
+        base_url=fb["api_base"],
+        model=fb["model"],
+        temperature=fb.get("temperature", 0.3),
+        max_tokens=fb.get("max_tokens", 4096),
     )

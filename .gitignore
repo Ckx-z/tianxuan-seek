@@ -29,3 +29,4 @@ Thumbs.db
 
 # Secrets
 .env
+config/extraction.yaml  # 含 API key，不纳入版本控制
