@@ -1,18 +1,19 @@
-# 主 LLM 配置（当前使用 MiMo）
+# 主 LLM 配置（当前使用 MiniMax M2.7）
 minimax:
-  api_base: "https://token-plan-cn.xiaomimimo.com/v1"
-  model: "mimo-v2.5-pro"
-  api_key: "tp-cco1ldct7lxvg5d9navn8t8j8xcnu9wgih6jxe2i16sr9844"
+  api_base: "https://api.minimax.chat/v1"
+  model: "MiniMax-M2.7"
+  api_key: "sk-cp-92s-QlC-D5e9oHVskGNltXqzTmE8QPq9_mKo8G6g7SlW3yx2gUkU63Tsst3ZGoODXMC7DCkmdPckAsoN5dl9MuL_TUrwJ0P_j0HonkEh3opRLW58kmdPWqw"
   temperature: 0.3
   max_tokens: 4096
   max_input_chars: 8000
   retry: 3
   sleep_between: 10
 
-# 备用 LLM 配置（MiMo 不可用时切回 MiniMax）
+# 备用 LLM 配置（M2.7 不可用时切回 MiMo）
 fallback:
-  api_base: "https://api.minimax.chat/v1"
-  model: "MiniMax-M2.7"
+  api_base: "https://token-plan-cn.xiaomimimo.com/v1"
+  model: "mimo-v2.5-pro"
+  api_key: "tp-cco1ldct7lxvg5d9navn8t8j8xcnu9wgih6jxe2i16sr9844"
   temperature: 0.3
   max_tokens: 4096
 
