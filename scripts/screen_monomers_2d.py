@@ -16,9 +16,11 @@ import sys
 
 import numpy as np
 import pandas as pd
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 from rdkit.Chem import Descriptors
 from rdkit.Chem.inchi import MolToInchiKey
+
+RDLogger.logger().setLevel(RDLogger.ERROR)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,9 +28,50 @@ from src.screening.features import FeatureEngineer
 from src.chemistry.monomer import MonomerLibrary
 from src.chemistry.imine_check import ImineChecker
 from src.chemistry.fluorination import FluorineDetector
+from src.chemistry.linker_analyzer import (
+    is_functionally_symmetric, has_heterocycle, count_aromatic_rings,
+)
 from src.utils.logger import setup_logger
 
 logger = setup_logger("screen_2d")
+
+# ── Phase 2 硬规则常量 ──
+MAX_AROMATIC_RINGS = 4       # 规则 1: 单体芳环数上限
+HETEROCYCLE_PENALTY = 0.85   # 规则 3: 含杂环单体对的 margin 降权系数
+
+# 官能团 SMARTS (用于类型感知对称性检测)
+_ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
+_AM_SMARTS = Chem.MolFromSmarts("[NH2]")
+
+
+def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
+    """检测单体在目标官能团类型上的对称性 (处理 aldehyde-amine 双类型)。"""
+    from rdkit.Chem.AllChem import GetMorganFingerprint
+
+    if n_ald >= 2:
+        matches = mol.GetSubstructMatches(_ALD_SMARTS)
+    elif n_am >= 2:
+        matches = mol.GetSubstructMatches(_AM_SMARTS)
+    else:
+        return False
+
+    reactive = [m[0] for m in matches]
+    if len(reactive) < 2:
+        return False
+
+    Chem.GetSymmSSSR(mol)
+    fps = []
+    for aidx in reactive:
+        try:
+            fp = GetMorganFingerprint(mol, 2, fromAtoms=[aidx], useChirality=True)
+            fps.append(fp)
+        except Exception:
+            return False
+
+    for i in range(1, len(fps)):
+        if fps[i] != fps[0]:
+            return False
+    return True
 
 
 def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
@@ -79,6 +122,8 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
                     "n_aldehyde": n_ald,
                     "n_amine": n_am,
                     "n_papers": 1,
+                    "has_heterocycle": has_heterocycle(mol),
+                    "n_aromatic_rings": count_aromatic_rings(mol),
                 }
             else:
                 smi_info[can_smi]["n_papers"] += 1
@@ -96,8 +141,10 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
         if Chem.MolFromSmiles(s) is not None
     }
 
-    # 过滤：2D COF 需要 ≥2 官能团
+    # 过滤：2D COF 需要 ≥2 官能团 + 硬规则 1/2
     valid = []
+    n_excluded_rings = 0     # 规则 1: 芳环数超标
+    n_excluded_symmetry = 0  # 规则 2: 官能团不对称
     for can_smi, info in smi_info.items():
         if can_smi in COF_EXCLUDE:
             continue
@@ -115,11 +162,30 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
         if not (is_ald or is_am):
             continue
 
+        mol = Chem.MolFromSmiles(can_smi)
+        if mol is None:
+            continue
+
+        # 硬规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS
+        if info["n_aromatic_rings"] > MAX_AROMATIC_RINGS:
+            n_excluded_rings += 1
+            continue
+
+        # 硬规则 2: 官能团必须对称
+        if not _check_monomer_symmetry(mol, n_ald, n_am):
+            n_excluded_symmetry += 1
+            continue
+
         info["is_aldehyde"] = is_ald or is_dual
         info["is_amine"] = is_am or is_dual
         info["is_dual"] = is_dual
         info["name"] = info["best_name"]
         valid.append(info)
+
+    if n_excluded_rings > 0:
+        logger.info(f"硬规则1 排除 (芳环数>{MAX_AROMATIC_RINGS}): {n_excluded_rings} 个单体")
+    if n_excluded_symmetry > 0:
+        logger.info(f"硬规则2 排除 (官能团不对称): {n_excluded_symmetry} 个单体")
 
     df = pd.DataFrame(valid)
     if len(df) == 0:
@@ -235,6 +301,16 @@ def main():
             n_ald = int(row.get("n_aldehyde", 0))
             n_am = int(row.get("n_amine", 0))
             mtype = row["monomer_type"]
+
+            # 硬规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS
+            n_arom = count_aromatic_rings(mol)
+            if n_arom > MAX_AROMATIC_RINGS:
+                continue
+
+            # 硬规则 2: 官能团对称性
+            if not _check_monomer_symmetry(mol, n_ald, n_am):
+                continue
+
             is_ald = mtype in ("aldehyde", "aldehyde-amine") and n_ald >= 2
             is_am = mtype in ("amine", "aldehyde-amine") and n_am >= 2
             dual = mtype == "aldehyde-amine" and n_ald >= 2 and n_am >= 2
@@ -266,6 +342,8 @@ def main():
                 "is_dual": dual,
                 "mw": mw,
                 "topology": _topo(n_ald if is_ald else 0, n_am if is_am else 0),
+                "has_heterocycle": has_heterocycle(mol),
+                "n_aromatic_rings": n_arom,
             })
 
         if new_rows:
@@ -317,6 +395,8 @@ def main():
                     "aldehyde_topo": ald.get("topology", "?"),
                     "amine_topo": am.get("topology", "?"),
                     "pair_type": pair_type,
+                    "ald_has_heterocycle": ald.get("has_heterocycle", False),
+                    "am_has_heterocycle": am.get("has_heterocycle", False),
                 })
         n_pairs = len(ald_df) * len(am_df)
         logger.info(f"  {pair_type}: {len(ald_df)}×{len(am_df)}={n_pairs}")
@@ -478,6 +558,22 @@ def main():
 
     ranked = deduped.sort_values("margin_score", ascending=False)
 
+    # 硬规则 3: 含杂环单体对降权 (软惩罚, 非硬排除)
+    n_hetero_pairs = (ranked["ald_has_heterocycle"] | ranked["am_has_heterocycle"]).sum()
+    ranked["hetero_penalty"] = 1.0
+    hetero_mask = ranked["ald_has_heterocycle"] | ranked["am_has_heterocycle"]
+    ranked.loc[hetero_mask, "hetero_penalty"] = HETEROCYCLE_PENALTY
+    # 双侧杂环叠加降权
+    double_hetero = ranked["ald_has_heterocycle"] & ranked["am_has_heterocycle"]
+    ranked.loc[double_hetero, "hetero_penalty"] = HETEROCYCLE_PENALTY ** 2
+    ranked["adjusted_score"] = ranked["margin_score"] * ranked["hetero_penalty"]
+    ranked = ranked.sort_values("adjusted_score", ascending=False)
+    if n_hetero_pairs > 0:
+        logger.info(
+            f"硬规则3 杂环降权: {n_hetero_pairs}/{len(ranked)} 对 "
+            f"(单侧×{HETEROCYCLE_PENALTY}, 双侧×{HETEROCYCLE_PENALTY**2:.4f})"
+        )
+
     # 添加拓扑标签
     ranked["topology"] = [
         _topology_label(r["aldehyde_topo"], r["amine_topo"])
@@ -499,14 +595,14 @@ def main():
 
     # 打印
     print("\n" + "=" * 88)
-    print(f"  Route A Top {min(args.top, len(top))} 单体对 — 2D COF 成膜预测 (margin排序)")
+    print(f"  Route A Top {min(args.top, len(top))} 单体对 — 2D COF 成膜预测 (adjusted_score排序)")
     print("=" * 88)
-    print(f"  {'#':3s}  {'得分':7s}  {'校准概率':8s}  {'醛单体':30s}  {'胺单体':28s}  {'拓扑':10s}")
+    print(f"  {'#':3s}  {'调整分':7s}  {'原始分':7s}  {'醛单体':30s}  {'胺单体':28s}  {'拓扑':10s}")
     print("  " + "-" * 86)
     for i, (_, row) in enumerate(top.iterrows()):
         print(
-            f"  [{i+1:2d}]  {row['margin_score']:6.1f}  "
-            f"{row.get('film_probability', 0):.4f}     "
+            f"  [{i+1:2d}]  {row['adjusted_score']:6.1f}  "
+            f"{row['margin_score']:6.1f}  "
             f"{str(row['aldehyde'])[:28]:28s}  {str(row['amine'])[:26]:26s}  "
             f"{row['topology']:10s}"
         )
