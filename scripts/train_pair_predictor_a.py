@@ -25,7 +25,7 @@ import torch.nn.functional as F
 import xgboost as xgb
 from rdkit import Chem
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import RepeatedStratifiedKFold
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
@@ -38,6 +38,8 @@ from src.screening.gnn import (MoleculeEncoder, smiles_to_graph,
 from src.utils.logger import setup_logger
 
 warnings.filterwarnings("ignore")
+from rdkit import RDLogger
+RDLogger.logger().setLevel(RDLogger.ERROR)
 logger = setup_logger("pair_pred_a")
 
 HIDDEN = 256
@@ -217,7 +219,7 @@ def main():
         mol = Chem.MolFromSmiles(smi)
         if mol is not None:
             mol_cache[smi] = mol
-    pair_extra = np.zeros((len(train_data), 18), dtype=np.float32)
+    pair_extra = np.zeros((len(train_data), 26), dtype=np.float32)
     ald_acet = np.zeros(len(train_data), dtype=bool)
     am_acet = np.zeros(len(train_data), dtype=bool)
     for i, d in enumerate(train_data):
@@ -228,7 +230,7 @@ def main():
             ald_acet[i] = has_acetylene(ald_mol)
             am_acet[i] = has_acetylene(am_mol)
     n_acet_pairs = (ald_acet | am_acet).sum()
-    logger.info(f"机理描述符: 18 维/对, 含炔对={n_acet_pairs}/{len(train_data)} "
+    logger.info(f"机理描述符: 26 维/对, 含炔对={n_acet_pairs}/{len(train_data)} "
                 f"({n_acet_pairs/len(train_data)*100:.1f}%)")
 
     # ── XGBoost 基线 ──
@@ -250,7 +252,7 @@ def main():
         "max_depth": 8, "min_child_weight": 5, "n_estimators": 302,
         "reg_alpha": 1.379, "reg_lambda": 1.259, "subsample": 0.878,
     }
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=SEED)
+    cv = RepeatedStratifiedKFold(n_splits=8, n_repeats=8, random_state=SEED)
     xgb_prs = []
     for tr_idx, va_idx in cv.split(np.zeros(len(labels)), labels):
         sw = (len(labels[tr_idx]) - labels[tr_idx].sum()) / max(labels[tr_idx].sum(), 1)
@@ -281,7 +283,10 @@ def main():
     best_model_state = None
     best_val_pr = 0.0
 
+    n_folds = cv.get_n_splits() if hasattr(cv, 'get_n_splits') else 64
     for fold, (tr_idx, va_idx) in enumerate(cv.split(np.zeros(len(labels)), labels)):
+        rep = fold // 8 + 1
+        fid = fold % 8 + 1
         t_ald = [ald_graphs[i] for i in tr_idx]
         t_am = [am_graphs[i] for i in tr_idx]
         t_y = labels[tr_idx]
@@ -297,7 +302,7 @@ def main():
 
         # 初始化分类头 (方案 B 权重作为暖启动)
         head = BilinearHead(hidden=HIDDEN, bilinear_rank=64, mlp_hidden=128,
-                              dropout=0.4, extra_dim=18)
+                              dropout=0.4, extra_dim=26)
         if os.path.exists(plan_b_path):
             plan_b_state = torch.load(plan_b_path, map_location="cpu")
             # 只暖启动 U/V/Bias (双线性部分), MLP 因 extra_dim 扩维需随机初始化
@@ -305,7 +310,7 @@ def main():
                           if k in head.state_dict()
                           and v.shape == head.state_dict()[k].shape}
             head.load_state_dict(head_state, strict=False)
-            logger.info(f"  Fold {fold+1}: 分类头从方案 B 权重暖启动")
+            logger.info(f"  R{rep}F{fid}: 分类头从方案 B 权重暖启动")
 
         model = EndToEndModel(encoder_a, head)
 
@@ -338,7 +343,7 @@ def main():
                 ], weight_decay=weight_decay)
                 sch = CosineAnnealingLR(opt, T_max=epochs)
                 encoder_unfrozen = True
-                logger.info(f"  Fold {fold+1} ep {ep}: 编码器解冻 (lr_enc={lr_encoder})")
+                logger.info(f"  R{rep}F{fid} ep {ep}: 编码器解冻 (lr_enc={lr_encoder})")
 
             model.train()
             n = len(t_ald)
@@ -368,7 +373,7 @@ def main():
                 va_pr, _ = eval_graph_model(model, v_ald, v_am, v_y,
                                             pair_extra=v_extra)
                 tag = "[frozen]" if not encoder_unfrozen else "[finetune]"
-                logger.info(f"  Fold {fold+1} ep {ep:3d} {tag}: val_PR={va_pr:.4f}")
+                logger.info(f"  R{rep}F{fid} ep {ep:3d} {tag}: val_PR={va_pr:.4f}")
 
                 if va_pr > best_pr + 1e-4:
                     best_pr = va_pr
@@ -377,7 +382,7 @@ def main():
                 else:
                     patience += 1
                 if patience >= early_stop:
-                    logger.info(f"  Fold {fold+1}: early stop @ epoch {ep}, best_PR={best_pr:.4f}")
+                    logger.info(f"  R{rep}F{fid}: early stop @ epoch {ep}, best_PR={best_pr:.4f}")
                     break
 
         model.load_state_dict(best_state)
@@ -385,7 +390,7 @@ def main():
                                             pair_extra=v_extra)
         a_prs.append(val_pr)
         a_rocs.append(val_roc)
-        logger.info(f"  Fold {fold+1}: PR-AUC={val_pr:.4f}, ROC-AUC={val_roc:.4f}")
+        logger.info(f"  R{rep}F{fid}: PR-AUC={val_pr:.4f}, ROC-AUC={val_roc:.4f}")
 
         if val_pr > best_val_pr:
             best_val_pr = val_pr
@@ -397,9 +402,10 @@ def main():
 
     # ── 结果对比 ──
     print("\n" + "=" * 65)
-    print("  D2-A: 微调 GNN + Bilinear Head (方案 A)")
+    print(f"  D2-A: 微调 GNN + Bilinear Head (方案 A) — 8×8 重复 CV ({len(a_prs)} 折)")
     print("=" * 65)
-    print(f"\n  {'方法':35s} {'PR-AUC':14s} {'ROC-AUC':10s}")
+    print(f"\n  各折 PR-AUC: {' '.join(f'{p:.4f}' for p in a_prs)}")
+    print(f"  {'方法':35s} {'PR-AUC':14s} {'ROC-AUC':10s}")
     print(f"  {'-' * 55}")
     print(f"  {'XGBoost (512-dim)':35s} "
           f"{np.mean(xgb_prs):.4f} ± {np.std(xgb_prs):.4f}  —")
