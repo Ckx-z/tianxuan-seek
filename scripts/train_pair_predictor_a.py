@@ -272,7 +272,7 @@ def main():
     lr_encoder = 1e-5
     lr_head = 1e-3
     weight_decay = 2e-4
-    ranking_weight = 0.05
+    ranking_weight = 0.005
 
     alpha = labels.sum() / len(labels)
     criterion = FocalLoss(alpha=1 - alpha, gamma=2.0)
