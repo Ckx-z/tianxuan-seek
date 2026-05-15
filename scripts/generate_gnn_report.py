@@ -104,9 +104,9 @@ def _fmt_name(name, max_len=50):
 
 def main():
     parser = argparse.ArgumentParser(description="生成 GNN+XGBoost 筛选 Word 报告")
-    parser.add_argument("--top20", default="data/processed/route_a_gnn_top20.csv")
+    parser.add_argument("--top20", default="data/processed/route_a_gnn_top40.csv")
     parser.add_argument("--xgb-info", default="models/v1.0/model_info.json")
-    parser.add_argument("--output", default="data/processed/Route_A_GNN_Report.docx")
+    parser.add_argument("--output", default="data/processed/Route_A_GNN_Report_Top40.docx")
     args = parser.parse_args()
 
     from docx import Document
@@ -145,7 +145,7 @@ def main():
 
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run("GNN (60%) + XGBoost (40%) 加权融合筛选")
+    run = p.add_run("GNN (60%) + XGBoost (40%) 加权融合 | 四项硬规则 | Top 40 双模分层")
     run.font.size = Pt(14)
     run.font.color.rgb = RGBColor(80, 80, 80)
 
@@ -171,7 +171,7 @@ def main():
     doc.add_paragraph(
         "从 ~1000 篇 2D COF 文献出发，经 LLM 结构化提取 → 化学验证 → "
         "GNN+XGBoost 双模型集成 → 全量自由配对 → 三项硬规则过滤 → "
-        "C3-胺分层选取，最终输出 Top 20 推荐单体对。"
+        "C3-胺分层选取，最终输出 Top 40 推荐单体对 (大胺小醛 + 大醛小胺 双模)。"
     )
 
     _add_table(doc,
@@ -190,7 +190,7 @@ def main():
             ["C3 胺 bonus ×1.15", "62,948 对", "C3 胺提权", "15,065 对受益"],
             ["去重+杂环降权", "62,948 对", "去重 + 降权", "62,948 对"],
             ["标准2D拓扑", "62,948 对", "仅六方/四方", "61,527 对"],
-            ["C3-胺分层 Top20", "61,527 对", "C3池10+C2池10", "20 对"],
+            ["C3 双模分层 Top40", "61,527 对", "C3胺池14+C3醛池10+其余16", "40 对"],
         ],
         col_widths=[1.8, 1.3, 1.5, 1.1],
     )
@@ -253,13 +253,13 @@ def main():
         "  • GNN: 分子图子结构交互 (学习型特征)\n"
         "  • XGBoost: 显式指纹共现 (规则型特征)\n"
         "  • 分歧惩罚: ~5% 对 (div > 0.5) 被拉低\n"
-        "  • C3 胺 bonus: ×1.15 乘数 (补偿 C2/C3 数据不平衡)"
+        "  • C3 胺 bonus: ×1.15 (大胺小醛), C3 醛 bonus: ×1.10 (大醛小胺)"
     )
 
     doc.add_page_break()
 
     # ============================================================
-    # 3. 图集 T01–T20
+    # 3. 图集 T01–T40
     # ============================================================
     doc.add_heading("3. 分子结构图集", level=1)
 
@@ -396,7 +396,13 @@ def main():
              "位阻限制 — 排除多环芳烃 (六苯并蔻等)"],
             ["#2 对称 (CanonicalRankAtoms)", "硬排除", "344 单体",
              "RDKit 全分子对称感知 + 仅芳香伯胺 [NH2][c]"],
-            ["#3 杂环降权 ×0.85", "软惩罚", "25,580 / 62,948 对",
+            ["#4 C2 对位检查", "硬排除", "53 单体",
+             "C2 反应基团必须在同苯环对位 (1,4) — 排除间/邻位异构体"],
+            ["#5 炔丙基醚排除", "硬排除", "1 单体",
+             "排除醚键+炔基共存 (化学不相容)"],
+            ["#6 C2 取代基限卤素", "硬排除", "9 单体",
+             "C2 单体苯环 >4 取代基时，多余取代基限卤素 (排除 OH/OMe/OEt)"],
+            ["#3 杂环降权 ×0.85", "软惩罚", "6,736 / 18,252 对",
              "苯环优先: 双侧杂环 ×0.7225"],
             ["C3 胺 bonus ×1.15", "软Bonus", "15,065 / 62,948 对",
              "补偿训练集 C2/C3 ≈ 7:1 不平衡"],
@@ -405,7 +411,7 @@ def main():
     )
 
     # 氟策略分布
-    doc.add_heading("4.2 Top 20 氟策略分布", level=2)
+    doc.add_heading("4.2 Top 40 氟策略分布", level=2)
     from collections import Counter
     f_counts = top_df["pair_type"].value_counts()
     f_rows = []
@@ -423,14 +429,17 @@ def main():
     )
 
     # 拓扑分布
-    doc.add_heading("4.3 Top 20 拓扑分布", level=2)
+    doc.add_heading("4.3 Top 40 拓扑分布", level=2)
     topo_counts = top_df["topology"].value_counts()
     topo_rows = [[str(t), str(c), f"{100*c/len(top_df):.0f}%"] for t, c in topo_counts.items()]
     _add_table(doc, ["拓扑类型", "对数", "占比"], topo_rows, col_widths=[1.5, 0.6, 0.6])
 
     c3_ratio = (top_df["amine_topo"] == "C3").sum()
     doc.add_paragraph(
-        f"C3-胺占比: {c3_ratio}/20 ({100*c3_ratio//20}%) — 分层选取: C3-胺池 Top 10 + C2/C4-胺池 Top 10。\n"
+        f"C3-胺占比: {c3_ratio}/{len(top_df)} ({100*c3_ratio//len(top_df)}%) — "
+        f"C3-醛占比: {(top_df['aldehyde_topo'] == 'C3').sum()}/{len(top_df)}"
+        f" ({(top_df['aldehyde_topo']=='C3').sum()*100//len(top_df)}%) — "
+        f"双模分层: 大胺小醛(C3胺)35% + 大醛小胺(C3醛)25% + 其余40%。\n"
         f"GNN 均值: {top_df['gnn_norm'].mean():.3f}, "
         f"XGB 均值: {top_df['xgb_norm'].mean():.3f}, "
         f"平均分歧: {top_df['divergence'].mean():.3f}"
@@ -465,32 +474,36 @@ def main():
     nf_nf = int(((~top_df["aldehyde_f"]) & (~top_df["amine_f"])).sum())
 
     findings = [
-        ("C3 胺分层选取",
-         f"Top 20 中 {c3_count}/20 ({100*c3_count//20}%) 使用 C3 胺单体，通过分层选取实现化学设计意图。"
-         "C3 胺提供三个连接方向 → 形成更稳固的 2D 六方网络。"
-         "模型天然偏向 C2 小分子（训练集 C2:C3 ≈ 7:1），分层选取纠正了此偏向。"),
-        ("大胺小醛设计模式",
-         "Top 14 (C3-胺组) 呈现典型「大胺小醛」模式: "
-         "C3 胺 (MW 350–600) 作为框架节点 + C2 醛 (MW 150–250) 作为连接臂。"
-         "四氟对苯二甲醛 (TFTA) 和炔丙氧基对苯二甲醛 为最优醛；"
-         "TAPB 和三(氨苯基)苯胺衍生物 为最优胺。"),
+        ("C3 双模分层选取",
+         f"Top 40 中 C3-胺 {c3_count}/{len(top_df)} ({100*c3_count//len(top_df)}%), "
+         f"C3-醛 {(top_df['aldehyde_topo']=='C3').sum()}/{len(top_df)}"
+         f" ({(top_df['aldehyde_topo']=='C3').sum()*100//len(top_df)}%)。"
+         "双模分层: 大胺小醛 (C3胺) 主导六方拓扑, 大醛小胺 (C3醛×C2胺) 占中段排名。"
+         "模型天然偏向 C2 小分子, 分层选取补偿了数据不平衡。"),
+        ("大胺小醛 + 大醛小胺 双模式",
+         "Top 14 (C3-胺组) 呈现典型「大胺小醛」: C3 胺 (MW 350-600) 作框架节点 + C2 醛作连接臂。"
+         "中段 #9-#24 呈现「大醛小胺」: C3 醛 (TFB 衍生物) 作节点 + C2 对苯二胺作连接臂。"
+         "两种模式均有化学合理性, 适用于不同合成场景。"),
         ("GNN+XGBoost 协同效应",
          f"XGBoost (mean={top_df['xgb_norm'].mean():.3f}) 比 GNN "
-         f"(mean={top_df['gnn_norm'].mean():.3f}) 更保守，有效抑制 GNN 对训练集高频单体的过拟合。"
-         "分歧惩罚使一致高分对排到前列，GNN 偏好的可疑组合被拉低。"),
-        ("硬规则过滤效果",
+         f"(mean={top_df['gnn_norm'].mean():.3f}) 更保守, 有效抑制 GNN 对训练集高频单体的过拟合。"
+         "分歧惩罚使一致高分对排到前列, GNN 偏好的可疑组合被拉低。"),
+        ("四项硬规则过滤效果",
          "苯环硬限制 (#0) 排除 94 个非芳香单体 (含 glyoxal)。"
-         "[NH2][c] SMARTS 修复排除酰肼类假阳性胺，不对称排除从 259 降至 174。"
-         "三项硬规则过滤 ~26% 输入单体，Top 20 化学合理性显著提升。"),
+         "[NH2][c] SMARTS 修复排除酰肼类假阳性胺, "
+         "CanonicalRankAtoms (#2) 排除 344 个不对称单体, "
+         "对位检查 (#4) 防御性保留 (当前池 0 排除)。"
+         "四项硬规则过滤 ~36% 输入单体, Top 40 化学合理性显著提升。"),
         ("氟策略分布",
-         f"F-醛 × 非F-胺 占 {f_ald}/20，非F-醛 × 非F-胺 占 {nf_nf}/20。"
-         "TFTA 的四氟取代提供强吸电子效应 → 增强亚胺键稳定性，"
+         f"F-醛 × 非F-胺 占 {f_ald}/{len(top_df)}, "
+         f"非F-醛 × 非F-胺 占 {nf_nf}/{len(top_df)}。"
+         "TFTA 的四氟取代提供强吸电子效应 → 增强亚胺键稳定性, "
          "同时不降低胺侧亲核性。含氟醛 + 非氟 C3 大胺是最优策略。"),
-        ("后续建议",
+        ("后续建议与化学先验正则化",
          "① 合成验证 Top 5 配对 (TFTA + TAPB 衍生物); "
-         "② 将反应条件 (溶剂/温度/催化剂) 纳入特征空间; "
-         "③ 多任务学习 (成膜+结晶度+拓扑) 提升模型鲁棒性; "
-         "④ 对 GNN 进行正则化 (dropout/L2) 缓解单体过拟合"),
+         "② 验证化学先验准确性后, 将规则转为训练中正则化 (合成负样本 + 化学惩罚项); "
+         "③ 将反应条件 (溶剂/温度/催化剂) 纳入特征空间; "
+         "④ 多任务学习 (成膜+结晶度+拓扑) 提升模型鲁棒性"),
     ]
 
     for title, body in findings:

@@ -39,9 +39,11 @@ logger = setup_logger("screen_2d")
 MAX_AROMATIC_RINGS = 4       # 规则 1: 单体芳环数上限
 HETEROCYCLE_PENALTY = 0.85   # 规则 3: 含杂环单体对的 margin 降权系数
 
-# 官能团 SMARTS (用于类型感知对称性检测)
+# 官能团 SMARTS (用于类型感知对称性检测 + 对位检查)
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
-_AM_SMARTS = Chem.MolFromSmarts("[NH2]")
+_AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")          # 仅芳香伯胺
+_BENZENE_SMARTS = Chem.MolFromSmarts("c1ccccc1")     # 苯环
+_PROPARGYL_ETHER = Chem.MolFromSmarts("cOCC#C")      # 炔丙基醚
 
 
 def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
@@ -71,6 +73,90 @@ def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
     for i in range(1, len(fps)):
         if fps[i] != fps[0]:
             return False
+    return True
+
+
+def _check_para_position(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> bool:
+    """规则 #4: C2 单体的两个反应基团必须在同一苯环的对位 (1,4)。
+
+    若两基团分属不同苯环 (联苯连接臂)，放行。
+    """
+    if topo != "C2":
+        return True
+
+    if n_ald >= 2:
+        matches = mol.GetSubstructMatches(_ALD_SMARTS)
+        reactive_atoms = [m[2] for m in matches]  # m[2] = ring carbon
+    elif n_am >= 2:
+        matches = mol.GetSubstructMatches(_AM_SMARTS)
+        reactive_atoms = [m[1] for m in matches]  # m[1] = ring carbon
+    else:
+        return False
+    if len(reactive_atoms) < 2:
+        return False
+
+    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+
+    for ring in rings:
+        ring_set = set(ring)
+        on_ring = [a for a in reactive_atoms if a in ring_set]
+        if len(on_ring) < 2:
+            continue
+
+        for i in range(len(on_ring)):
+            for j in range(i + 1, len(on_ring)):
+                path = Chem.GetShortestPath(mol, on_ring[i], on_ring[j])
+                ring_bonds = sum(
+                    1 for k in range(len(path) - 1)
+                    if path[k] in ring_set and path[k + 1] in ring_set
+                )
+                if ring_bonds == 3:
+                    return True
+                elif ring_bonds in (1, 2):
+                    return False
+
+    return True
+
+
+def _has_propargyl_ether(mol: Chem.Mol) -> bool:
+    return mol.HasSubstructMatch(_PROPARGYL_ETHER)
+
+
+def _check_c2_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> bool:
+    """规则 #5: C2 单体苯环取代基 >4 时，多余取代基限卤素。"""
+    if topo != "C2":
+        return True
+
+    if n_ald >= 2:
+        reactive_smarts = _ALD_SMARTS
+        idx = 2  # m[2] = ring C in [CX3H1](=O)[#6]
+    elif n_am >= 2:
+        reactive_smarts = _AM_SMARTS
+        idx = 1  # m[1] = ring C in [NH2][c]
+    else:
+        return False
+
+    matches = mol.GetSubstructMatches(reactive_smarts)
+    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+    _HALOGENS = {9, 17, 35, 53}
+
+    for ring in rings:
+        ring_set = set(ring)
+        n_sub = 0
+        n_nonhalo_extra = 0
+        for aidx in ring:
+            atom = mol.GetAtomWithIdx(aidx)
+            for nbr in atom.GetNeighbors():
+                if nbr.GetIdx() not in ring_set:
+                    n_sub += 1
+                    if nbr.GetAtomicNum() not in _HALOGENS and nbr.GetAtomicNum() != 1:
+                        n_nonhalo_extra += 1
+
+        if n_sub > 4:
+            reactive = {m[idx] for m in matches if m[idx] in ring_set}
+            if n_nonhalo_extra > len(reactive):
+                return False
+
     return True
 
 
@@ -145,6 +231,9 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
     valid = []
     n_excluded_rings = 0     # 规则 1: 芳环数超标
     n_excluded_symmetry = 0  # 规则 2: 官能团不对称
+    n_excluded_para = 0      # 规则 4: C2 非对位
+    n_excluded_propargyl = 0  # 规则 5: 炔丙基醚
+    n_excluded_c2sub = 0    # 规则 6: C2 取代基超标
     for can_smi, info in smi_info.items():
         if can_smi in COF_EXCLUDE:
             continue
@@ -176,16 +265,44 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
             n_excluded_symmetry += 1
             continue
 
+        # 计算拓扑 (规则 #4 需要)
+        if is_ald:
+            topo = "C3" if n_ald >= 3 else "C2" if n_ald >= 2 else "?"
+        else:
+            topo = "C4" if n_am >= 4 else "C3" if n_am >= 3 else "C2" if n_am >= 2 else "?"
+
+        # 硬规则 4: C2 必须对位
+        if not _check_para_position(mol, n_ald, n_am, topo):
+            n_excluded_para += 1
+            continue
+
+        # 硬规则 5: 炔丙基醚排除
+        if _has_propargyl_ether(mol):
+            n_excluded_propargyl += 1
+            continue
+
+        # 硬规则 6: C2 取代基 >4 限卤素
+        if not _check_c2_substituents(mol, topo, n_ald, n_am):
+            n_excluded_c2sub += 1
+            continue
+
         info["is_aldehyde"] = is_ald or is_dual
         info["is_amine"] = is_am or is_dual
         info["is_dual"] = is_dual
         info["name"] = info["best_name"]
+        info["topology"] = topo
         valid.append(info)
 
     if n_excluded_rings > 0:
         logger.info(f"硬规则1 排除 (芳环数>{MAX_AROMATIC_RINGS}): {n_excluded_rings} 个单体")
     if n_excluded_symmetry > 0:
         logger.info(f"硬规则2 排除 (官能团不对称): {n_excluded_symmetry} 个单体")
+    if n_excluded_para > 0:
+        logger.info(f"硬规则4 排除 (C2非对位): {n_excluded_para} 个单体")
+    if n_excluded_propargyl > 0:
+        logger.info(f"硬规则5 排除 (炔丙基醚): {n_excluded_propargyl} 个单体")
+    if n_excluded_c2sub > 0:
+        logger.info(f"硬规则6 排除 (C2取代基超标): {n_excluded_c2sub} 个单体")
 
     df = pd.DataFrame(valid)
     if len(df) == 0:
@@ -250,8 +367,8 @@ def main():
                        help="额外单体 CSV (如商业单体), columns: smiles,name,monomer_type,has_fluorine,n_f_atoms,n_aldehyde,n_amine")
     parser.add_argument("--model-dir", default="models/v1.0")
     parser.add_argument("--cache", default="data/processed/monomer_smiles_cache.json")
-    parser.add_argument("--output", default="data/processed/route_a_top20.csv")
-    parser.add_argument("--top", type=int, default=20)
+    parser.add_argument("--output", default="data/processed/route_a_top40_v1.csv")
+    parser.add_argument("--top", type=int, default=40)
     args = parser.parse_args()
 
     # 检查模型
@@ -315,8 +432,6 @@ def main():
             is_am = mtype in ("amine", "aldehyde-amine") and n_am >= 2
             dual = mtype == "aldehyde-amine" and n_ald >= 2 and n_am >= 2
 
-            mw = Descriptors.MolWt(mol)
-
             def _topo(n_al, n_am_):
                 if n_al >= 3: return "C3"
                 elif n_al >= 2: return "C2"
@@ -324,6 +439,22 @@ def main():
                 elif n_am_ >= 3: return "C3"
                 elif n_am_ >= 2: return "C2"
                 return "?"
+
+            topo = _topo(n_ald if is_ald else 0, n_am if is_am else 0)
+
+            # 硬规则 4: C2 必须对位
+            if not _check_para_position(mol, n_ald, n_am, topo):
+                continue
+
+            # 硬规则 5: 炔丙基醚排除
+            if _has_propargyl_ether(mol):
+                continue
+
+            # 硬规则 6: C2 取代基 >4 限卤素
+            if not _check_c2_substituents(mol, topo, n_ald, n_am):
+                continue
+
+            mw = Descriptors.MolWt(mol)
 
             new_rows.append({
                 "smiles": smi,
@@ -341,7 +472,7 @@ def main():
                 "is_amine": is_am or dual,
                 "is_dual": dual,
                 "mw": mw,
-                "topology": _topo(n_ald if is_ald else 0, n_am if is_am else 0),
+                "topology": topo,
                 "has_heterocycle": has_heterocycle(mol),
                 "n_aromatic_rings": n_arom,
             })

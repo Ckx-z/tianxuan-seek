@@ -47,6 +47,7 @@ HETEROCYCLE_PENALTY = 0.85
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
 _AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")          # 仅芳香伯胺 (排除酰肼、脂肪胺、磺酰胺)
 _BENZENE_SMARTS = Chem.MolFromSmarts("c1ccccc1")     # 苯环硬规则
+_PROPARGYL_ETHER = Chem.MolFromSmarts("cOCC#C")      # 炔丙基醚 (醚键+炔基共存)
 
 def _has_benzene_ring(mol: Chem.Mol) -> bool:
     """单体是否至少含一个苯环 (全碳六元芳香环)。"""
@@ -79,6 +80,110 @@ def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
     ranks = CanonicalRankAtoms(mol, breakTies=False)
     reactive_ranks = [ranks[a] for a in reactive]
     return all(r == reactive_ranks[0] for r in reactive_ranks[1:])
+
+
+def _check_para_position(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> bool:
+    """规则 #4: C2 单体的两个反应基团必须在同一苯环的对位 (1,4)，不允许邻/间位。
+
+    若两基团分属不同苯环 (如联苯连接臂)，放行——各自独立定位不受几何约束。
+    """
+    if topo != "C2":
+        return True  # 仅检查 C2 单体
+
+    if n_ald >= 2:
+        matches = mol.GetSubstructMatches(_ALD_SMARTS)
+        # m[2] = [#6] ring carbon the formyl is attached to (m[0] is formyl C, not in ring)
+        reactive_atoms = [m[2] for m in matches]
+    elif n_am >= 2:
+        matches = mol.GetSubstructMatches(_AM_SMARTS)
+        # m[1] = [c] ring carbon the NH2 is attached to (m[0] is N)
+        reactive_atoms = [m[1] for m in matches]
+    else:
+        return False
+    if len(reactive_atoms) < 2:
+        return False
+
+    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+
+    for ring in rings:
+        ring_set = set(ring)
+        on_ring = [a for a in reactive_atoms if a in ring_set]
+        if len(on_ring) < 2:
+            continue  # 两基团不在同一苯环，跳过
+
+        # 同环 → 必须对位 (环内最短路径 = 3 键)
+        for i in range(len(on_ring)):
+            for j in range(i + 1, len(on_ring)):
+                path = Chem.GetShortestPath(mol, on_ring[i], on_ring[j])
+                ring_bonds = sum(
+                    1 for k in range(len(path) - 1)
+                    if path[k] in ring_set and path[k + 1] in ring_set
+                )
+                if ring_bonds == 3:  # para (1,4)
+                    return True
+                elif ring_bonds in (1, 2):  # ortho (1,2) / meta (1,3)
+                    return False
+
+    # 两基团不在同一苯环 → 通过 (联苯二醛/二胺等长连接臂)
+    return True
+
+
+def _has_propargyl_ether(mol: Chem.Mol) -> bool:
+    """检测炔丙基醚 (醚键+炔基共存于同一取代基)。"""
+    return mol.HasSubstructMatch(_PROPARGYL_ETHER)
+
+
+def _check_c2_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> bool:
+    """规则 #5: C2 单体反应苯环上 >4 取代基时，多余取代基必须全部为卤素。
+
+    对苯二甲醛衍生物常有 OH/OEt/F 等取代。若取代基数 >4，非卤素取代
+    (如 OH, OMe, OEt, CH3) 会造成位阻过大或电子效应过于复杂。
+    """
+    if topo != "C2":
+        return True
+
+    if n_ald >= 2:
+        reactive_smarts = _ALD_SMARTS
+    elif n_am >= 2:
+        reactive_smarts = _AM_SMARTS
+    else:
+        return False
+
+    matches = mol.GetSubstructMatches(reactive_smarts)
+    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+
+    _HALOGENS = {9, 17, 35, 53}  # F, Cl, Br, I
+    _H = {1}
+
+    for ring in rings:
+        ring_set = set(ring)
+        n_sub = 0
+        n_nonhalo_extra = 0
+        for aidx in ring:
+            atom = mol.GetAtomWithIdx(aidx)
+            for nbr in atom.GetNeighbors():
+                if nbr.GetIdx() not in ring_set:
+                    n_sub += 1
+                    nbr_atomic = nbr.GetAtomicNum()
+                    if nbr_atomic not in _HALOGENS and nbr_atomic not in _H:
+                        n_nonhalo_extra += 1
+
+        if n_sub > 4:
+            reactive_ring_positions = set()
+            for m in matches:
+                if n_ald >= 2:
+                    ring_c = m[2]  # [#6] atom
+                else:
+                    ring_c = m[1]  # [c] atom
+                if ring_c in ring_set:
+                    reactive_ring_positions.add(ring_c)
+
+            # non-halogen substituents should only be the reactive groups
+            n_reactive = len(reactive_ring_positions)
+            if n_nonhalo_extra > n_reactive:
+                return False
+
+    return True
 
 
 def _topology_label(ald_topo: str, am_topo: str) -> str:
@@ -166,7 +271,7 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
 
     # 应用规则过滤
     valid = []
-    n_no_benzene, n_rings, n_sym, n_func = 0, 0, 0, 0
+    n_no_benzene, n_rings, n_sym, n_para, n_propargyl, n_c2sub, n_func = 0, 0, 0, 0, 0, 0, 0
     for can, info in all_smis.items():
         mol = Chem.MolFromSmiles(can)
         if mol is None:
@@ -200,7 +305,7 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
             n_sym += 1
             continue
 
-        # 拓扑
+        # 计算拓扑标签 (规则 #4 需要)
         if is_ald:
             if n_ald >= 3:
                 topo = "C3"
@@ -218,6 +323,21 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
             else:
                 topo = "?"
 
+        # 规则 4: C2 必须对位
+        if not _check_para_position(mol, n_ald, n_am, topo):
+            n_para += 1
+            continue
+
+        # 规则 5: 炔丙基醚排除 (醚键+炔基共存)
+        if _has_propargyl_ether(mol):
+            n_propargyl += 1
+            continue
+
+        # 规则 6: C2 取代基 >4 限卤素
+        if not _check_c2_substituents(mol, topo, n_ald, n_am):
+            n_c2sub += 1
+            continue
+
         info["is_aldehyde"] = is_ald or is_dual
         info["is_amine"] = is_am or is_dual
         info["is_dual"] = is_dual
@@ -230,7 +350,8 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
     logger.info(
         f"过滤: 官能团不足={n_func}, 无苯环={n_no_benzene}, "
         f"芳环>{MAX_AROMATIC_RINGS}={n_rings}, "
-        f"不对称={n_sym} → 可用={len(valid)}"
+        f"不对称={n_sym}, 非对位C2={n_para}, "
+        f"炔丙基醚={n_propargyl}, C2取代基超标={n_c2sub} → 可用={len(valid)}"
     )
 
     df = pd.DataFrame(valid)
@@ -440,27 +561,52 @@ def _compute_xgb_margins(pairs_df: pd.DataFrame, model_dir: str) -> pd.DataFrame
 
 
 def _select_top_stratified(
-    ranked: pd.DataFrame, n_total: int = 20, c3_ratio: float = 0.70,
+    ranked: pd.DataFrame, n_total: int = 40,
+    c3_am_ratio: float = 0.35, c3_ald_ratio: float = 0.25,
 ) -> pd.DataFrame:
-    """分层选取: C3-胺池取 c3_ratio%, C2/C4 池取剩余。"""
-    c3_pool = ranked[ranked["amine_topo"] == "C3"]
-    other_pool = ranked[ranked["amine_topo"] != "C3"]
+    """双模分层选取: 大胺小醛 (C3-胺) 35% + 大醛小胺 (C3-醛) 25% + 其余 40%。"""
+    # 池 1: 大胺小醛 (any-aldehyde × C3-amine)
+    dama_pool = ranked[ranked["amine_topo"] == "C3"]
+    # 池 2: 大醛小胺 (C3-aldehyde × non-C3-amine)
+    daan_pool = ranked[
+        (ranked["aldehyde_topo"] == "C3") & (ranked["amine_topo"] != "C3")
+    ]
+    # 池 3: 其余 (C2×C2, C4, etc.)
+    used_idx = set(dama_pool.index) | set(daan_pool.index)
+    rest_pool = ranked[~ranked.index.isin(used_idx)]
 
-    n_c3 = int(n_total * c3_ratio)
-    n_other = n_total - n_c3
+    n_dama = int(n_total * c3_am_ratio)
+    n_daan = int(n_total * c3_ald_ratio)
+    n_rest = n_total - n_dama - n_daan
 
-    c3_top = c3_pool.head(min(n_c3, len(c3_pool)))
-    other_top = other_pool.head(min(n_other, len(other_pool)))
+    dama_top = dama_pool.head(n_dama)
+    daan_top = daan_pool.head(n_daan)
+    rest_top = rest_pool.head(n_rest)
 
-    # 若 C3 池不足，从 other 补
-    if len(c3_top) < n_c3:
-        n_other += n_c3 - len(c3_top)
+    # 各池不足时从其余池补充
+    actual_dama = len(dama_top)
+    actual_daan = len(daan_top)
 
-    combined = pd.concat([c3_top, other_top.head(n_other)], ignore_index=True)
+    if actual_dama < n_dama:
+        n_rest += n_dama - actual_dama
+    if actual_daan < n_daan:
+        n_rest += n_daan - actual_daan
+
+    combined = pd.concat(
+        [dama_top, daan_top, rest_pool.iloc[len(rest_top):len(rest_top) + max(0, n_rest)]],
+        ignore_index=True,
+    )
+    # 补足 rest
+    remaining = n_total - len(combined)
+    if remaining > 0:
+        extra = rest_pool.iloc[len(rest_top) + max(0, n_rest) : len(rest_top) + max(0, n_rest) + remaining]
+        combined = pd.concat([combined, extra], ignore_index=True)
+
     combined = combined.sort_values("adjusted_score", ascending=False).reset_index(drop=True)
     logger.info(
-        f"分层选取: C3-胺={len(c3_top)}/{len(c3_pool)}, "
-        f"C2/C4={min(n_other, len(other_pool))}/{len(other_pool)}"
+        f"分层: 大胺小醛(C3胺)={actual_dama}/{len(dama_pool)}, "
+        f"大醛小胺(C3醛)={actual_daan}/{len(daan_pool)}, "
+        f"其余={n_rest}/{len(rest_pool)} → 共{len(combined)}"
     )
     return combined
 
@@ -471,8 +617,8 @@ def main():
     parser.add_argument("--meta", default="data/processed/label_metadata_v4.csv")
     parser.add_argument("--model", default="models/v2.0/end_to_end_a.pt")
     parser.add_argument("--xgb-model", default="models/v1.0")
-    parser.add_argument("--output", default="data/processed/route_a_gnn_top20.csv")
-    parser.add_argument("--top", type=int, default=20)
+    parser.add_argument("--output", default="data/processed/route_a_gnn_top40.csv")
+    parser.add_argument("--top", type=int, default=40)
     args = parser.parse_args()
 
     # 1. 加载全量单体
@@ -530,13 +676,18 @@ def main():
         f"高分歧(>0.5)={high_div}/{len(valid)}"
     )
 
-    # 7. C3 胺 soft bonus
-    logger.info("=== 7. C3 胺 bonus (×1.15) ===")
-    c3_mask = valid["amine_topo"] == "C3"
+    # 7. C3 soft bonus (胺 + 醛)
+    logger.info("=== 7. C3 bonus (胺 ×1.15, 醛 ×1.10) ===")
+    c3_am_mask = valid["amine_topo"] == "C3"
+    c3_ald_mask = valid["aldehyde_topo"] == "C3"
     valid["c3_bonus"] = 1.0
-    valid.loc[c3_mask, "c3_bonus"] = 1.15
+    valid.loc[c3_am_mask, "c3_bonus"] = 1.15  # 大胺小醛
+    valid.loc[c3_ald_mask & ~c3_am_mask, "c3_bonus"] = 1.10  # 大醛小胺 (避免叠加)
     valid["margin_score"] = valid["ensemble_score"] * valid["c3_bonus"]
-    logger.info(f"C3 胺受益: {c3_mask.sum()}/{len(valid)} 对")
+    logger.info(
+        f"C3 胺受益: {c3_am_mask.sum()}, "
+        f"C3 醛受益: {(c3_ald_mask & ~c3_am_mask).sum()}/{len(valid)} 对"
+    )
 
     # 8. InChI 去重
     logger.info("=== 8. 去重 ===")
@@ -573,9 +724,9 @@ def main():
     std2d = deduped[deduped["topology"].apply(_is_2d_topology)]
     logger.info(f"标准2D拓扑: {len(std2d)} (排除 {len(deduped)-len(std2d)})")
 
-    # 11. 分层选取 Top 20
-    logger.info("=== 11. 分层选取 Top 20 (C3-胺 50%) ===")
-    top = _select_top_stratified(std2d, n_total=args.top, c3_ratio=0.50)
+    # 11. 分层选取 Top 40
+    logger.info("=== 11. 分层选取 Top 40 (C3-胺 35%, C3-醛 25%) ===")
+    top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.35, c3_ald_ratio=0.25)
 
     # 保存
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
@@ -585,19 +736,23 @@ def main():
     print(f"\nTop {args.top} 已保存至: {args.output}")
     print(f"全量结果: {args.output.replace('.csv', '_full.csv')}")
 
-    # 打印 Top 20
-    print("\n" + "=" * 108)
-    print(f"  Route A Top {args.top} — GNN(70%)+XGB(30%) 集成 + 三条硬规则 + C3分层")
-    print("=" * 108)
+    # 打印 Top 40
+    print("\n" + "=" * 112)
+    print(f"  Route A Top {args.top} — GNN+XGB 集成 + 四项硬规则 + C3 双模分层")
+    print("=" * 112)
     print(f"  {'#':3s}  {'综合分':7s}  {'GNN':7s}  {'XGB':7s}  {'分歧':6s}  "
-          f"{'醛单体':28s}  {'胺单体':24s}  {'拓扑':10s}  {'氟策略':14s}")
-    print("  " + "-" * 106)
+          f"{'醛(拓扑)':14s}  {'胺(拓扑)':14s}  {'拓扑':10s}  {'氟策略':14s}")
+    print("  " + "-" * 110)
     for i, (_, row) in enumerate(top.iterrows()):
+        ald_name = str(row['aldehyde'])[:11].encode("ascii", "replace").decode("ascii")
+        am_name = str(row['amine'])[:11].encode("ascii", "replace").decode("ascii")
+        ald_tag = f"{ald_name} {row['aldehyde_topo']}"
+        am_tag = f"{am_name} {row['amine_topo']}"
         print(
             f"  [{i+1:2d}]  {row['adjusted_score']:6.3f}  "
             f"{row['gnn_norm']:6.3f}  {row['xgb_norm']:6.3f}  "
             f"{row['divergence']:5.2f}  "
-            f"{str(row['aldehyde'])[:26]:26s}  {str(row['amine'])[:22]:22s}  "
+            f"{ald_tag:14s}  {am_tag:14s}  "
             f"{row['topology']:10s}  {row['pair_type']:14s}"
         )
 
@@ -607,8 +762,10 @@ def main():
           f"胺={monomers['is_amine'].sum()})")
     print(f"配对: {len(pairs_df)}, 去重后: {len(deduped)}, 标准2D: {len(std2d)}")
     print(f"拓扑分布: {std2d['topology'].value_counts().to_dict()}")
-    c3_in_top = (top["amine_topo"] == "C3").sum()
-    print(f"Top {args.top} 中 C3-胺占比: {c3_in_top}/{len(top)} ({100*c3_in_top/len(top):.0f}%)")
+    c3_am_in_top = (top["amine_topo"] == "C3").sum()
+    c3_ald_in_top = (top["aldehyde_topo"] == "C3").sum()
+    print(f"Top {args.top} 中 C3-胺: {c3_am_in_top}/{len(top)} ({100*c3_am_in_top/len(top):.0f}%), "
+          f"C3-醛: {c3_ald_in_top}/{len(top)} ({100*c3_ald_in_top/len(top):.0f}%)")
     print(f"氟策略分布: {top['pair_type'].value_counts().to_dict()}")
 
 
