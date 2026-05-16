@@ -64,7 +64,11 @@ def _canon(smi: str) -> str:
 
 
 def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
-    """类型感知的官能团对称性检测 (CanonicalRankAtoms 全分子对称感知)。"""
+    """官能团对称性检测 — CanonicalRankAtoms 全分子拓扑对称感知。
+
+    CanonicalRankAtoms 同时覆盖中心对称和左右对称 (镜像对称):
+      两个反应位点 rank 相同 ⇔ 化学环境完全等价 ⇔ 单体整体对称。
+    """
     from rdkit.Chem import CanonicalRankAtoms
 
     if n_ald >= 2:
@@ -83,20 +87,20 @@ def _check_monomer_symmetry(mol: Chem.Mol, n_ald: int, n_am: int) -> bool:
 
 
 def _check_para_position(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> bool:
-    """规则 #4: C2 单体的两个反应基团必须在同一苯环的对位 (1,4)，不允许邻/间位。
+    """规则 #4: C2 单体同苯环对位约束。
 
-    若两基团分属不同苯环 (如联苯连接臂)，放行——各自独立定位不受几何约束。
+    单苯环 (n_rings=1): 两基团必须在同环对位 (1,4)，不允许邻/间位。
+    多苯环 (n_rings>1): 允许非对位，但必须满足规则 2 对称性 (由调用方联合判断)。
+    若两基团分属不同苯环 → 放行。
     """
     if topo != "C2":
-        return True  # 仅检查 C2 单体
+        return True
 
     if n_ald >= 2:
         matches = mol.GetSubstructMatches(_ALD_SMARTS)
-        # m[2] = [#6] ring carbon the formyl is attached to (m[0] is formyl C, not in ring)
         reactive_atoms = [m[2] for m in matches]
     elif n_am >= 2:
         matches = mol.GetSubstructMatches(_AM_SMARTS)
-        # m[1] = [c] ring carbon the NH2 is attached to (m[0] is N)
         reactive_atoms = [m[1] for m in matches]
     else:
         return False
@@ -104,14 +108,16 @@ def _check_para_position(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> boo
         return False
 
     rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+    n_benzene_rings = len(rings)
+    is_single_benzene = (n_benzene_rings == 1)
 
     for ring in rings:
         ring_set = set(ring)
         on_ring = [a for a in reactive_atoms if a in ring_set]
         if len(on_ring) < 2:
-            continue  # 两基团不在同一苯环，跳过
+            continue
 
-        # 同环 → 必须对位 (环内最短路径 = 3 键)
+        # 同环 → 检查位置
         for i in range(len(on_ring)):
             for j in range(i + 1, len(on_ring)):
                 path = Chem.GetShortestPath(mol, on_ring[i], on_ring[j])
@@ -122,10 +128,84 @@ def _check_para_position(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> boo
                 if ring_bonds == 3:  # para (1,4)
                     return True
                 elif ring_bonds in (1, 2):  # ortho (1,2) / meta (1,3)
-                    return False
+                    if is_single_benzene:
+                        return False  # 单苯环必须对位
+                    # 多苯环: 允许非对位，返回 None 表示需联合规则 2 判断
+                    return None
 
-    # 两基团不在同一苯环 → 通过 (联苯二醛/二胺等长连接臂)
+    # 两基团不在同一苯环 → 通过
     return True
+
+
+def _count_linear_para_chain(mol: Chem.Mol) -> int:
+    """统计最长直链对位苯环序列长度。
+
+    直链定义: 苯环之间 para-to-para 连接，形成 —Ph—Ph—Ph— 线性骨架。
+    端环只需 1 个 para-苯连接 (另一端为 NH2/CHO 等非苯取代)，内部环须 2 个 para-苯连接。
+    返回最长连续 para-苯环数 (≥1)。
+    """
+    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
+    n_rings = len(rings)
+    if n_rings < 2:
+        return n_rings
+
+    # para_adj: ring_i → [neighbor_ring_j, ...] (仅 para-位的苯-苯连接)
+    para_adj = {}
+
+    for i, ring in enumerate(rings):
+        ri_set = set(ring)
+        ext_conns = []  # [(ring_atom, neighbor_atom), ...]
+        for a_idx in ring:
+            atom = mol.GetAtomWithIdx(a_idx)
+            for nbr in atom.GetNeighbors():
+                if nbr.GetIdx() not in ri_set:
+                    ext_conns.append((a_idx, nbr.GetIdx()))
+
+        # 找 para 位对 (ring_bonds == 3) 且两侧连接各自通向其他苯环
+        conn_atoms = list(set(a for a, _ in ext_conns))
+        for u in range(len(conn_atoms)):
+            for v in range(u + 1, len(conn_atoms)):
+                path = Chem.GetShortestPath(mol, conn_atoms[u], conn_atoms[v])
+                ring_bonds = sum(1 for k in range(len(path) - 1)
+                                 if path[k] in ri_set and path[k + 1] in ri_set)
+                if ring_bonds != 3:
+                    continue
+                for ca in [conn_atoms[u], conn_atoms[v]]:
+                    atom_ca = mol.GetAtomWithIdx(ca)
+                    for nbr in atom_ca.GetNeighbors():
+                        if nbr.GetIdx() not in ri_set:
+                            for j, other in enumerate(rings):
+                                if i != j and nbr.GetIdx() in set(other):
+                                    para_adj.setdefault(i, []).append(j)
+
+    # DFS 最长路径
+    visited = set()
+    best = 0
+    def dfs(node, length):
+        nonlocal best
+        visited.add(node)
+        best = max(best, length)
+        for nb in para_adj.get(node, []):
+            if nb not in visited:
+                dfs(nb, length + 1)
+        visited.remove(node)
+
+    for start in para_adj:
+        dfs(start, 1)
+
+    return max(best, 1)
+
+
+_LINEAR_CHAIN_THRESHOLD = 3          # >3 个直链苯环开始惩罚
+_LINEAR_CHAIN_PENALTY_PER_RING = 0.08  # 每多一个苯环扣 8%
+
+
+def _compute_chain_penalty(n_chain: int) -> float:
+    """直链苯环过长惩罚系数 ∈ (0, 1]。"""
+    if n_chain <= _LINEAR_CHAIN_THRESHOLD:
+        return 1.0
+    excess = n_chain - _LINEAR_CHAIN_THRESHOLD
+    return max(0.4, 1.0 - excess * _LINEAR_CHAIN_PENALTY_PER_RING)
 
 
 def _has_propargyl_ether(mol: Chem.Mol) -> bool:
@@ -295,11 +375,9 @@ def load_monomer_universe(pool_path: str, meta_path: str,
             n_no_benzene += 1
             continue
 
-        # 规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS (chem_penalty 覆盖)
+        # 规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS [已关闭 — 实验]
         n_arom = count_aromatic_rings(mol)
-        if use_hard_rules and n_arom > MAX_AROMATIC_RINGS:
-            n_rings += 1
-            continue
+        # (规则 1 已禁用)
 
         # 规则 2: 对称性 (chem_penalty 覆盖)
         if use_hard_rules and not _check_monomer_symmetry(mol, n_ald, n_am):
@@ -319,10 +397,16 @@ def load_monomer_universe(pool_path: str, meta_path: str,
             else:
                 topo = "?"
 
-        # 规则 4: C2 必须对位 (chem_penalty 覆盖)
-        if use_hard_rules and not _check_para_position(mol, n_ald, n_am, topo):
-            n_para += 1
-            continue
+        # 规则 4: C2 对位约束 (chem_penalty 覆盖)
+        #   True  → 通过; False → 排除; None → 多苯环非对位, 需联合规则 2 (已通过)
+        if use_hard_rules:
+            para_result = _check_para_position(mol, n_ald, n_am, topo)
+            if para_result is False:
+                n_para += 1
+                continue
+            elif para_result is None:
+                # 多苯环非对位: 规则 2 已在前面验证, 此处仅记录
+                pass
 
         # 规则 5: 炔丙基醚排除 (chem_penalty 未覆盖, 始终保留)
         if _has_propargyl_ether(mol):
@@ -334,12 +418,14 @@ def load_monomer_universe(pool_path: str, meta_path: str,
             n_c2sub += 1
             continue
 
+        chain_len = _count_linear_para_chain(mol)
         info["is_aldehyde"] = is_ald or is_dual
         info["is_amine"] = is_am or is_dual
         info["is_dual"] = is_dual
         info["topology"] = topo
         info["has_heterocycle"] = has_heterocycle(mol)
         info["n_aromatic_rings"] = n_arom
+        info["linear_chain_len"] = chain_len
         info["mw"] = Descriptors.MolWt(mol)
         valid.append(info)
 
@@ -396,6 +482,8 @@ def build_pairs(monomers: pd.DataFrame, meta_path: str) -> pd.DataFrame:
                 "pair_type": ptype,
                 "ald_has_heterocycle": ald.get("has_heterocycle", False),
                 "am_has_heterocycle": am.get("has_heterocycle", False),
+                "ald_linear_chain": int(ald.get("linear_chain_len", 1)),
+                "am_linear_chain": int(am.get("linear_chain_len", 1)),
             })
 
     pairs_df = pd.DataFrame(pairs)
@@ -558,9 +646,9 @@ def _compute_xgb_margins(pairs_df: pd.DataFrame, model_dir: str) -> pd.DataFrame
 
 def _select_top_stratified(
     ranked: pd.DataFrame, n_total: int = 40,
-    c3_am_ratio: float = 0.40, c3_ald_ratio: float = 0.40,
+    c3_am_ratio: float = 0.45, c3_ald_ratio: float = 0.45,
 ) -> pd.DataFrame:
-    """双模分层选取: 大胺小醛 (C3-胺) 40% + 大醛小胺 (C3-醛) 40% + 其余 20%。"""
+    """双模分层选取: 大胺小醛 (C3-胺) 45% + 大醛小胺 (C3-醛) 45% + 其余 10%。"""
     # 池 1: 大胺小醛 (any-aldehyde × C3-amine)
     dama_pool = ranked[ranked["amine_topo"] == "C3"]
     # 池 2: 大醛小胺 (C3-aldehyde × non-C3-amine)
@@ -706,17 +794,21 @@ def main():
     deduped = pd.DataFrame(pair_dedup.values())
     logger.info(f"去重: {len(valid)} → {len(deduped)}")
 
-    # 9. 规则 3: 杂环降权
-    logger.info("=== 9. 规则3 杂环降权 ===")
-    n_hetero = (deduped["ald_has_heterocycle"] | deduped["am_has_heterocycle"]).sum()
-    deduped["hetero_penalty"] = 1.0
-    mask = deduped["ald_has_heterocycle"] | deduped["am_has_heterocycle"]
-    deduped.loc[mask, "hetero_penalty"] = HETEROCYCLE_PENALTY
-    double = deduped["ald_has_heterocycle"] & deduped["am_has_heterocycle"]
-    deduped.loc[double, "hetero_penalty"] = HETEROCYCLE_PENALTY ** 2
-    deduped["adjusted_score"] = deduped["margin_score"] * deduped["hetero_penalty"]
+    # 9. 规则 3: 杂环降权 [已关闭 — 实验]
+    logger.info("=== 9. 规则3 杂环降权 [已关闭] ===")
+    deduped["adjusted_score"] = deduped["margin_score"]
+
+    # 9b. 直链苯环过长惩罚 (>3 个 para-苯环)
+    ald_chain = deduped["ald_linear_chain"].astype(int)
+    am_chain = deduped["am_linear_chain"].astype(int)
+    deduped["chain_penalty"] = np.minimum(
+        np.vectorize(_compute_chain_penalty)(ald_chain),
+        np.vectorize(_compute_chain_penalty)(am_chain),
+    )
+    n_chain_penalized = (deduped["chain_penalty"] < 1.0).sum()
+    deduped["adjusted_score"] = deduped["adjusted_score"] * deduped["chain_penalty"]
     deduped = deduped.sort_values("adjusted_score", ascending=False)
-    logger.info(f"受影响: {n_hetero}/{len(deduped)} 对")
+    logger.info(f"直链苯环惩罚: {n_chain_penalized}/{len(deduped)} 对受影响")
 
     # 10. 拓扑过滤
     logger.info("=== 10. 拓扑过滤 ===")
@@ -728,8 +820,8 @@ def main():
     logger.info(f"标准2D拓扑: {len(std2d)} (排除 {len(deduped)-len(std2d)})")
 
     # 11. 分层选取 Top 40
-    logger.info("=== 11. 分层选取 Top 40 (C3-胺 40%, C3-醛 40%) ===")
-    top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.40, c3_ald_ratio=0.40)
+    logger.info("=== 11. 分层选取 Top 40 (C3-胺 45%, C3-醛 45%) ===")
+    top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.45, c3_ald_ratio=0.45)
 
     # 保存
     output_path = args.output
