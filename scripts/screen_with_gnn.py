@@ -41,13 +41,14 @@ DEVICE = "cpu"
 BATCH_SIZE = 64
 
 # ── Phase 2 硬规则 ──
-MAX_AROMATIC_RINGS = 4
+MAX_AROMATIC_RINGS = 5  # 总芳环数 (苯环+杂芳环) 上限
 HETEROCYCLE_PENALTY = 0.85
 
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
 _AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")          # 仅芳香伯胺 (排除酰肼、脂肪胺、磺酰胺)
 _BENZENE_SMARTS = Chem.MolFromSmarts("c1ccccc1")     # 苯环硬规则
 _PROPARGYL_ETHER = Chem.MolFromSmarts("cOCC#C")      # 炔丙基醚 (醚键+炔基共存)
+_N_HETERO_RING = Chem.MolFromSmarts("[n]")          # 含 N 杂芳环 (吡啶/嘧啶/三嗪/卟啉等)
 
 def _has_benzene_ring(mol: Chem.Mol) -> bool:
     """单体是否至少含一个苯环 (全碳六元芳香环)。"""
@@ -56,6 +57,11 @@ def _has_benzene_ring(mol: Chem.Mol) -> bool:
 def _count_aromatic_amines(mol: Chem.Mol) -> int:
     """统计芳香伯胺数量 ([NH2] 直接连接芳香碳)。"""
     return len(mol.GetSubstructMatches(_AM_SMARTS, uniquify=True))
+
+
+def _has_n_heterocycle(mol: Chem.Mol) -> bool:
+    """单体是否含 N 杂芳环 (吡啶/嘧啶/三嗪/卟啉等)。"""
+    return mol.HasSubstructMatch(_N_HETERO_RING)
 
 
 def _canon(smi: str) -> str:
@@ -383,9 +389,11 @@ def load_monomer_universe(pool_path: str, meta_path: str,
             n_no_benzene += 1
             continue
 
-        # 规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS [已关闭 — 实验]
+        # 规则 1: 总芳环数 (苯环+杂芳环) ≤ MAX_AROMATIC_RINGS
         n_arom = count_aromatic_rings(mol)
-        # (规则 1 已禁用)
+        if use_hard_rules and n_arom > MAX_AROMATIC_RINGS:
+            n_rings += 1
+            continue
 
         # 规则 2: 对称性 (chem_penalty 覆盖)
         if use_hard_rules and not _check_monomer_symmetry(mol, n_ald, n_am):
@@ -432,6 +440,7 @@ def load_monomer_universe(pool_path: str, meta_path: str,
         info["is_dual"] = is_dual
         info["topology"] = topo
         info["has_heterocycle"] = has_heterocycle(mol)
+        info["has_n_heterocycle"] = _has_n_heterocycle(mol)
         info["n_aromatic_rings"] = n_arom
         info["linear_chain_len"] = chain_len
         info["mw"] = Descriptors.MolWt(mol)
@@ -490,6 +499,8 @@ def build_pairs(monomers: pd.DataFrame, meta_path: str) -> pd.DataFrame:
                 "pair_type": ptype,
                 "ald_has_heterocycle": ald.get("has_heterocycle", False),
                 "am_has_heterocycle": am.get("has_heterocycle", False),
+                "ald_has_n_heterocycle": ald.get("has_n_heterocycle", False),
+                "am_has_n_heterocycle": am.get("has_n_heterocycle", False),
                 "ald_linear_chain": int(ald.get("linear_chain_len", 1)),
                 "am_linear_chain": int(am.get("linear_chain_len", 1)),
             })
@@ -779,21 +790,36 @@ def main():
         f"高分歧(>0.5)={high_div}/{len(valid)}"
     )
 
-    # 7. C3 soft bonus (胺 + 醛)
-    logger.info("=== 7. C3 bonus (胺 ×1.15, 醛 ×1.10) ===")
+    # 7. N 杂环 bonus (含 N 杂芳环单体 ×1.05)
+    N_HETERO_BETA = 0.05
+    logger.info(f"=== 7. N 杂环 bonus (β={N_HETERO_BETA}) ===")
+    ald_n_hetero = valid["ald_has_n_heterocycle"].astype(bool)
+    am_n_hetero = valid["am_has_n_heterocycle"].astype(bool)
+    valid["n_hetero_bonus"] = (1 + N_HETERO_BETA * ald_n_hetero.astype(float)) * \
+                               (1 + N_HETERO_BETA * am_n_hetero.astype(float))
+    n_ald_n_hetero = ald_n_hetero.sum()
+    n_am_n_hetero = am_n_hetero.sum()
+    valid["score_with_n"] = valid["ensemble_score"] * valid["n_hetero_bonus"]
+    logger.info(
+        f"N 杂环单体: 醛={n_ald_n_hetero}, 胺={n_am_n_hetero}, "
+        f"受益对={(ald_n_hetero | am_n_hetero).sum()}/{len(valid)}"
+    )
+
+    # 8. C3 soft bonus (胺 + 醛)
+    logger.info("=== 8. C3 bonus (胺 ×1.15, 醛 ×1.10) ===")
     c3_am_mask = valid["amine_topo"] == "C3"
     c3_ald_mask = valid["aldehyde_topo"] == "C3"
     valid["c3_bonus"] = 1.0
     valid.loc[c3_am_mask, "c3_bonus"] = 1.15  # 大胺小醛
     valid.loc[c3_ald_mask & ~c3_am_mask, "c3_bonus"] = 1.10  # 大醛小胺 (避免叠加)
-    valid["margin_score"] = valid["ensemble_score"] * valid["c3_bonus"]
+    valid["margin_score"] = valid["score_with_n"] * valid["c3_bonus"]
     logger.info(
         f"C3 胺受益: {c3_am_mask.sum()}, "
         f"C3 醛受益: {(c3_ald_mask & ~c3_am_mask).sum()}/{len(valid)} 对"
     )
 
-    # 8. InChI 去重
-    logger.info("=== 8. 去重 ===")
+    # 9. InChI 去重
+    logger.info("=== 9. 去重 ===")
     pair_dedup = {}
     for _, row in valid.iterrows():
         try:
@@ -806,11 +832,11 @@ def main():
     deduped = pd.DataFrame(pair_dedup.values())
     logger.info(f"去重: {len(valid)} → {len(deduped)}")
 
-    # 9. 规则 3: 杂环降权 [已关闭 — 实验]
-    logger.info("=== 9. 规则3 杂环降权 [已关闭] ===")
+    # 9. 初始化 adjusted_score
     deduped["adjusted_score"] = deduped["margin_score"]
 
-    # 9b. 直链苯环过长惩罚 (>3 个 para-苯环)
+    # 10. 直链苯环过长惩罚 (>3 个 para-苯环)
+    logger.info("=== 10. 直链苯惩罚 ===")
     ald_chain = deduped["ald_linear_chain"].astype(int)
     am_chain = deduped["am_linear_chain"].astype(int)
     deduped["chain_penalty"] = np.minimum(
@@ -822,12 +848,12 @@ def main():
     deduped = deduped.sort_values("adjusted_score", ascending=False)
     logger.info(f"直链苯环惩罚: {n_chain_penalized}/{len(deduped)} 对受影响")
 
-    # 9c. 苯环数 (分层判据)
+    # 11. 苯环数 (分层判据)
     deduped["ald_n_rings"] = deduped["aldehyde_smiles"].apply(_count_benzene_rings)
     deduped["am_n_rings"] = deduped["amine_smiles"].apply(_count_benzene_rings)
 
-    # 10. 拓扑过滤
-    logger.info("=== 10. 拓扑过滤 ===")
+    # 12. 拓扑过滤
+    logger.info("=== 12. 拓扑过滤 ===")
     deduped["topology"] = [
         _topology_label(r["aldehyde_topo"], r["amine_topo"])
         for _, r in deduped.iterrows()
@@ -835,8 +861,8 @@ def main():
     std2d = deduped[deduped["topology"].apply(_is_2d_topology)]
     logger.info(f"标准2D拓扑: {len(std2d)} (排除 {len(deduped)-len(std2d)})")
 
-    # 11. 分层选取 Top 40
-    logger.info("=== 11. 分层选取 Top 40 (大胺小醛 45%, 大醛小胺 45%) ===")
+    # 13. 分层选取 Top 40
+    logger.info("=== 13. 分层选取 Top 40 (大胺小醛 45%, 大醛小胺 45%) ===")
     top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.45, c3_ald_ratio=0.45)
 
     # 保存
