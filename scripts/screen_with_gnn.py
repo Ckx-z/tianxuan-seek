@@ -558,9 +558,9 @@ def _compute_xgb_margins(pairs_df: pd.DataFrame, model_dir: str) -> pd.DataFrame
 
 def _select_top_stratified(
     ranked: pd.DataFrame, n_total: int = 40,
-    c3_am_ratio: float = 0.35, c3_ald_ratio: float = 0.25,
+    c3_am_ratio: float = 0.40, c3_ald_ratio: float = 0.40,
 ) -> pd.DataFrame:
-    """双模分层选取: 大胺小醛 (C3-胺) 35% + 大醛小胺 (C3-醛) 25% + 其余 40%。"""
+    """双模分层选取: 大胺小醛 (C3-胺) 40% + 大醛小胺 (C3-醛) 40% + 其余 20%。"""
     # 池 1: 大胺小醛 (any-aldehyde × C3-amine)
     dama_pool = ranked[ranked["amine_topo"] == "C3"]
     # 池 2: 大醛小胺 (C3-aldehyde × non-C3-amine)
@@ -728,8 +728,8 @@ def main():
     logger.info(f"标准2D拓扑: {len(std2d)} (排除 {len(deduped)-len(std2d)})")
 
     # 11. 分层选取 Top 40
-    logger.info("=== 11. 分层选取 Top 40 (C3-胺 35%, C3-醛 25%) ===")
-    top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.35, c3_ald_ratio=0.25)
+    logger.info("=== 11. 分层选取 Top 40 (C3-胺 40%, C3-醛 40%) ===")
+    top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.40, c3_ald_ratio=0.40)
 
     # 保存
     output_path = args.output
