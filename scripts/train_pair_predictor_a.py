@@ -4,13 +4,15 @@
   1. Phase 1 (前 10 ep): 冻结 GNN 编码器, 仅训练 BilinearHead (含 18 维机理描述符)
   2. Phase 2 (后 790 ep): 解冻编码器, 分层 LR (encoder 1e-4, head 1e-3)
   3. 排序损失: 苯链接 > 含炔链接 (weight=0.05, 含炔正样本降权 0.2)
-  4. PR-AUC 每 5 ep 监控, 早停 patience=30
+  4. 化学惩罚项 (方案 B): L_total = L_focal + λ * violation_score
+  5. PR-AUC 每 5 ep 监控, 早停 patience=30
 
-对比基准:
-  XGBoost (512-dim):         0.671
-  方案 B (冻结+交互头):       0.704
-  方案 A (机理约束+渐进解冻):  目标 0.68-0.70
+用法:
+  python scripts/train_pair_predictor_a.py                          # 默认 λ=0.005
+  python scripts/train_pair_predictor_a.py --lambda-chem 0          # 关闭化学正则化
+  python scripts/train_pair_predictor_a.py --lambda-chem 0.01       # 更强惩罚
 """
+import argparse
 import json
 import os
 import sys
@@ -33,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.chemistry.linker_analyzer import (
     has_acetylene, compute_monomer_descriptors, compute_pair_descriptor_vector)
+from src.chemistry.chem_penalty import ViolationCache
 from src.screening.gnn import (MoleculeEncoder, smiles_to_graph,
                                collate_graphs, extract_monomer_embeddings)
 from src.utils.logger import setup_logger
@@ -166,6 +169,11 @@ def eval_graph_model(model, ald_g, am_g, labels, batch_size=64,
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lambda-chem", type=float, default=0.005,
+                        help="化学惩罚项强度 (默认 0.005, 设 0 关闭)")
+    args = parser.parse_args()
+
     # ── 加载数据 ──
     meta = pd.read_csv("data/processed/label_metadata_v4.csv", encoding="utf-8-sig")
     with open("data/processed/benchmark_pairs.json", encoding="utf-8") as f:
@@ -189,6 +197,18 @@ def main():
 
     labels = np.array([d["label"] for d in train_data])
     logger.info(f"训练集: {len(labels)} 样本, 正={labels.sum()} ({labels.mean()*100:.1f}%)")
+
+    # ── 化学违反度缓存 (方案 B) ──
+    v_cache = None
+    if args.lambda_chem > 0:
+        ald_smis = [d["ald"] for d in train_data]
+        am_smis = [d["am"] for d in train_data]
+        v_cache = ViolationCache(ald_smis, am_smis)
+        summary = v_cache.violation_summary()
+        logger.info(f"化学违反度缓存: {len(v_cache.scores)} 对, "
+                    f"均值={summary['mean']:.4f}, 非零率={summary['nonzero_frac']:.2%}")
+        logger.info(f"  λ_chem={args.lambda_chem}, "
+                    f"有效惩罚强度 ≈ λ × mean_viol × P(pred>0.5)")
 
     # ── 构建图缓存 ──
     all_smis = set()
@@ -362,6 +382,13 @@ def main():
                                     torch.tensor(t_am_acet[bi]),
                                     labels=y_b)
                 loss = focal + ranking_weight * rank
+                if args.lambda_chem > 0 and v_cache is not None:
+                    probs = torch.sigmoid(logits)
+                    v_batch = v_cache.to_tensor(
+                        [tr_idx[i] for i in bi], device=DEVICE)
+                    mask = (probs > 0.5).float()
+                    chem_pen = (mask * v_batch).mean()
+                    loss = loss + args.lambda_chem * chem_pen
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 opt.step()

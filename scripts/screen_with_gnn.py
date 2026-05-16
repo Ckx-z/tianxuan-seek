@@ -201,7 +201,8 @@ def _is_2d_topology(label: str) -> bool:
     return label.startswith("六方") or label.startswith("四方")
 
 
-def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
+def load_monomer_universe(pool_path: str, meta_path: str,
+                        use_hard_rules: bool = True) -> pd.DataFrame:
     """加载全量单体池: merged_pool + training labels 中的单体。"""
     imine_checker = ImineChecker()
     f_detector = FluorineDetector()
@@ -289,30 +290,25 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
             n_func += 1
             continue
 
-        # 规则 0: 必须含苯环
+        # 规则 0: 必须含苯环 (结构前提，chem_penalty 未覆盖)
         if not _has_benzene_ring(mol):
             n_no_benzene += 1
             continue
 
-        # 规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS
+        # 规则 1: 芳环数 ≤ MAX_AROMATIC_RINGS (chem_penalty 覆盖)
         n_arom = count_aromatic_rings(mol)
-        if n_arom > MAX_AROMATIC_RINGS:
+        if use_hard_rules and n_arom > MAX_AROMATIC_RINGS:
             n_rings += 1
             continue
 
-        # 规则 2
-        if not _check_monomer_symmetry(mol, n_ald, n_am):
+        # 规则 2: 对称性 (chem_penalty 覆盖)
+        if use_hard_rules and not _check_monomer_symmetry(mol, n_ald, n_am):
             n_sym += 1
             continue
 
         # 计算拓扑标签 (规则 #4 需要)
         if is_ald:
-            if n_ald >= 3:
-                topo = "C3"
-            elif n_ald >= 2:
-                topo = "C2"
-            else:
-                topo = "?"
+            topo = "C3" if n_ald >= 3 else ("C2" if n_ald >= 2 else "?")
         else:
             if n_am >= 4:
                 topo = "C4"
@@ -323,18 +319,18 @@ def load_monomer_universe(pool_path: str, meta_path: str) -> pd.DataFrame:
             else:
                 topo = "?"
 
-        # 规则 4: C2 必须对位
-        if not _check_para_position(mol, n_ald, n_am, topo):
+        # 规则 4: C2 必须对位 (chem_penalty 覆盖)
+        if use_hard_rules and not _check_para_position(mol, n_ald, n_am, topo):
             n_para += 1
             continue
 
-        # 规则 5: 炔丙基醚排除 (醚键+炔基共存)
+        # 规则 5: 炔丙基醚排除 (chem_penalty 未覆盖, 始终保留)
         if _has_propargyl_ether(mol):
             n_propargyl += 1
             continue
 
-        # 规则 6: C2 取代基 >4 限卤素
-        if not _check_c2_substituents(mol, topo, n_ald, n_am):
+        # 规则 6: C2 取代基 >4 限卤素 (chem_penalty 覆盖)
+        if use_hard_rules and not _check_c2_substituents(mol, topo, n_ald, n_am):
             n_c2sub += 1
             continue
 
@@ -619,11 +615,18 @@ def main():
     parser.add_argument("--xgb-model", default="models/v1.0")
     parser.add_argument("--output", default="data/processed/route_a_gnn_top40.csv")
     parser.add_argument("--top", type=int, default=40)
+    parser.add_argument("--no-hard-rules", action="store_true",
+                        help="移除化学硬规则 (#1#2#4#6), 信任模型自行判断")
+    parser.add_argument("--output-suffix", type=str, default="",
+                        help="输出文件后缀 (用于对比实验)")
     args = parser.parse_args()
 
     # 1. 加载全量单体
-    logger.info("=== 1. 加载全量单体 ===")
-    monomers = load_monomer_universe(args.pool, args.meta)
+    hard_rules_enabled = not args.no_hard_rules
+    tag = "no_hard" if args.no_hard_rules else "with_hard"
+    logger.info(f"=== 1. 加载全量单体 (硬规则={'ON' if hard_rules_enabled else 'OFF'}) ===")
+    monomers = load_monomer_universe(args.pool, args.meta,
+                                     use_hard_rules=hard_rules_enabled)
     logger.info(f"可用单体: {len(monomers)} (醛={monomers['is_aldehyde'].sum()}, "
                 f"胺={monomers['is_amine'].sum()})")
 
@@ -729,12 +732,16 @@ def main():
     top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.35, c3_ald_ratio=0.25)
 
     # 保存
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    top.to_csv(args.output, index=False, encoding="utf-8-sig")
-    deduped.to_csv(args.output.replace(".csv", "_full.csv"), index=False, encoding="utf-8-sig")
+    output_path = args.output
+    suffix = args.output_suffix or tag
+    if suffix and suffix not in output_path:
+        output_path = output_path.replace(".csv", f"_{suffix}.csv")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    top.to_csv(output_path, index=False, encoding="utf-8-sig")
+    deduped.to_csv(output_path.replace(".csv", "_full.csv"), index=False, encoding="utf-8-sig")
 
-    print(f"\nTop {args.top} 已保存至: {args.output}")
-    print(f"全量结果: {args.output.replace('.csv', '_full.csv')}")
+    print(f"\nTop {args.top} 已保存至: {output_path}")
+    print(f"全量结果: {output_path.replace('.csv', '_full.csv')}")
 
     # 打印 Top 40
     print("\n" + "=" * 112)
