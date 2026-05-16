@@ -200,6 +200,14 @@ _LINEAR_CHAIN_THRESHOLD = 3          # >3 个直链苯环开始惩罚
 _LINEAR_CHAIN_PENALTY_PER_RING = 0.08  # 每多一个苯环扣 8%
 
 
+def _count_benzene_rings(smi: str) -> int:
+    """统计单体苯环总数 (非直链，全部苯环)。"""
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        return 0
+    return len(mol.GetSubstructMatches(_BENZENE_SMARTS))
+
+
 def _compute_chain_penalty(n_chain: int) -> float:
     """直链苯环过长惩罚系数 ∈ (0, 1]。"""
     if n_chain <= _LINEAR_CHAIN_THRESHOLD:
@@ -648,14 +656,20 @@ def _select_top_stratified(
     ranked: pd.DataFrame, n_total: int = 40,
     c3_am_ratio: float = 0.45, c3_ald_ratio: float = 0.45,
 ) -> pd.DataFrame:
-    """双模分层选取: 大胺小醛 (C3-胺) 45% + 大醛小胺 (C3-醛) 45% + 其余 10%。"""
-    # 池 1: 大胺小醛 (any-aldehyde × C3-amine)
-    dama_pool = ranked[ranked["amine_topo"] == "C3"]
-    # 池 2: 大醛小胺 (C3-aldehyde × non-C3-amine)
-    daan_pool = ranked[
-        (ranked["aldehyde_topo"] == "C3") & (ranked["amine_topo"] != "C3")
-    ]
-    # 池 3: 其余 (C2×C2, C4, etc.)
+    """双模分层选取: 大胺小醛 45% + 大醛小胺 45% + 其余 10%。
+
+    分层判据: 苯环数比较 (不依赖拓扑标签)。
+      - 大胺小醛: amine 苯环数 > aldehyde 苯环数
+      - 大醛小胺: aldehyde 苯环数 > amine 苯环数
+      - 其余: 苯环数相等
+
+    C3 bonus 在池内排序中自然生效，保持 C3+C2 占比。
+    """
+    # 池 1: 大胺小醛 (n_rings: amine > aldehyde)
+    dama_pool = ranked[ranked["am_n_rings"] > ranked["ald_n_rings"]]
+    # 池 2: 大醛小胺 (n_rings: aldehyde > amine)
+    daan_pool = ranked[ranked["ald_n_rings"] > ranked["am_n_rings"]]
+    # 池 3: 其余 (苯环数相等)
     used_idx = set(dama_pool.index) | set(daan_pool.index)
     rest_pool = ranked[~ranked.index.isin(used_idx)]
 
@@ -667,7 +681,6 @@ def _select_top_stratified(
     daan_top = daan_pool.head(n_daan)
     rest_top = rest_pool.head(n_rest)
 
-    # 各池不足时从其余池补充
     actual_dama = len(dama_top)
     actual_daan = len(daan_top)
 
@@ -680,7 +693,6 @@ def _select_top_stratified(
         [dama_top, daan_top, rest_pool.iloc[len(rest_top):len(rest_top) + max(0, n_rest)]],
         ignore_index=True,
     )
-    # 补足 rest
     remaining = n_total - len(combined)
     if remaining > 0:
         extra = rest_pool.iloc[len(rest_top) + max(0, n_rest) : len(rest_top) + max(0, n_rest) + remaining]
@@ -688,9 +700,9 @@ def _select_top_stratified(
 
     combined = combined.sort_values("adjusted_score", ascending=False).reset_index(drop=True)
     logger.info(
-        f"分层: 大胺小醛(C3胺)={actual_dama}/{len(dama_pool)}, "
-        f"大醛小胺(C3醛)={actual_daan}/{len(daan_pool)}, "
-        f"其余={n_rest}/{len(rest_pool)} → 共{len(combined)}"
+        f"分层: 大胺小醛(胺环>醛环)={actual_dama}/{len(dama_pool)}, "
+        f"大醛小胺(醛环>胺环)={actual_daan}/{len(daan_pool)}, "
+        f"其余(环数相等)={n_rest}/{len(rest_pool)} → 共{len(combined)}"
     )
     return combined
 
@@ -810,6 +822,10 @@ def main():
     deduped = deduped.sort_values("adjusted_score", ascending=False)
     logger.info(f"直链苯环惩罚: {n_chain_penalized}/{len(deduped)} 对受影响")
 
+    # 9c. 苯环数 (分层判据)
+    deduped["ald_n_rings"] = deduped["aldehyde_smiles"].apply(_count_benzene_rings)
+    deduped["am_n_rings"] = deduped["amine_smiles"].apply(_count_benzene_rings)
+
     # 10. 拓扑过滤
     logger.info("=== 10. 拓扑过滤 ===")
     deduped["topology"] = [
@@ -820,7 +836,7 @@ def main():
     logger.info(f"标准2D拓扑: {len(std2d)} (排除 {len(deduped)-len(std2d)})")
 
     # 11. 分层选取 Top 40
-    logger.info("=== 11. 分层选取 Top 40 (C3-胺 45%, C3-醛 45%) ===")
+    logger.info("=== 11. 分层选取 Top 40 (大胺小醛 45%, 大醛小胺 45%) ===")
     top = _select_top_stratified(std2d, n_total=args.top, c3_am_ratio=0.45, c3_ald_ratio=0.45)
 
     # 保存
@@ -837,16 +853,16 @@ def main():
 
     # 打印 Top 40
     print("\n" + "=" * 112)
-    print(f"  Route A Top {args.top} — GNN+XGB 集成 + 四项硬规则 + C3 双模分层")
+    print(f"  Route A Top {args.top} — GNN+XGB 集成 + 四项硬规则 + 苯环数分层")
     print("=" * 112)
     print(f"  {'#':3s}  {'综合分':7s}  {'GNN':7s}  {'XGB':7s}  {'分歧':6s}  "
-          f"{'醛(拓扑)':14s}  {'胺(拓扑)':14s}  {'拓扑':10s}  {'氟策略':14s}")
+          f"{'醛(拓扑/环)':14s}  {'胺(拓扑/环)':14s}  {'拓扑':10s}  {'氟策略':14s}")
     print("  " + "-" * 110)
     for i, (_, row) in enumerate(top.iterrows()):
         ald_name = str(row['aldehyde'])[:11].encode("ascii", "replace").decode("ascii")
         am_name = str(row['amine'])[:11].encode("ascii", "replace").decode("ascii")
-        ald_tag = f"{ald_name} {row['aldehyde_topo']}"
-        am_tag = f"{am_name} {row['amine_topo']}"
+        ald_tag = f"{ald_name} {row['aldehyde_topo']}/{int(row['ald_n_rings'])}"
+        am_tag = f"{am_name} {row['amine_topo']}/{int(row['am_n_rings'])}"
         print(
             f"  [{i+1:2d}]  {row['adjusted_score']:6.3f}  "
             f"{row['gnn_norm']:6.3f}  {row['xgb_norm']:6.3f}  "
@@ -861,9 +877,15 @@ def main():
           f"胺={monomers['is_amine'].sum()})")
     print(f"配对: {len(pairs_df)}, 去重后: {len(deduped)}, 标准2D: {len(std2d)}")
     print(f"拓扑分布: {std2d['topology'].value_counts().to_dict()}")
+    dama_in_top = (top["am_n_rings"] > top["ald_n_rings"]).sum()
+    daan_in_top = (top["ald_n_rings"] > top["am_n_rings"]).sum()
+    eq_in_top = (top["ald_n_rings"] == top["am_n_rings"]).sum()
+    print(f"Top {args.top} 中 大胺小醛: {dama_in_top}/{len(top)} ({100*dama_in_top/len(top):.0f}%), "
+          f"大醛小胺: {daan_in_top}/{len(top)} ({100*daan_in_top/len(top):.0f}%), "
+          f"环数相等: {eq_in_top}/{len(top)} ({100*eq_in_top/len(top):.0f}%)")
     c3_am_in_top = (top["amine_topo"] == "C3").sum()
     c3_ald_in_top = (top["aldehyde_topo"] == "C3").sum()
-    print(f"Top {args.top} 中 C3-胺: {c3_am_in_top}/{len(top)} ({100*c3_am_in_top/len(top):.0f}%), "
+    print(f"C3-胺: {c3_am_in_top}/{len(top)} ({100*c3_am_in_top/len(top):.0f}%), "
           f"C3-醛: {c3_ald_in_top}/{len(top)} ({100*c3_ald_in_top/len(top):.0f}%)")
     print(f"氟策略分布: {top['pair_type'].value_counts().to_dict()}")
 

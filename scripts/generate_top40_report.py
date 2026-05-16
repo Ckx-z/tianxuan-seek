@@ -302,6 +302,7 @@ def main():
         ["对称性判断", "CanonicalRankAtoms 全分子拓扑对称 (中心+镜像), 无 Morgan 回退"],
         ["C2 对位", "单苯环→1,4对位 | 多苯环→对称+非对位 | ≥3直链苯→软惩罚"],
         ["直链苯惩罚", f"已影响 {int(n_chain_penalized):,} 对 (≥3对位直链苯→软惩罚)" if full is not None else "已启用"],
+        ["分层策略", "大胺小醛 45% + 大醛小胺 45% + 其余 10% (苯环数比较)"],
     ]
     _add_table(doc, ["指标", "值"], overview, col_widths=[2.5, 4.5], font_size=9)
     doc.add_page_break()
@@ -441,15 +442,20 @@ def main():
                [[t, c, f"{c/40*100:.0f}%"] for t, c in f_counts.items()],
                col_widths=[2.5, 1.0, 1.0], font_size=9)
 
-    # 3.3 C3 分层占比
-    _add_heading(doc, "3.3 C3 分层占比", level=2)
+    # 3.3 分层占比 (苯环数比较)
+    _add_heading(doc, "3.3 分层占比 (苯环数比较)", level=2)
+    dama = (top["am_n_rings"] > top["ald_n_rings"]).sum()
+    daan = (top["ald_n_rings"] > top["am_n_rings"]).sum()
+    eq_rings = (top["ald_n_rings"] == top["am_n_rings"]).sum()
     c3_am = (top["amine_topo"] == "C3").sum()
     c3_ald = (top["aldehyde_topo"] == "C3").sum()
     _add_table(doc, ["指标", "实际", "目标"],
-               [["C3-胺 (大胺小醛)", f"{c3_am}/40 ({c3_am*100/40:.0f}%)", "45%"],
-                ["C3-醛 (大醛小胺)", f"{c3_ald}/40 ({c3_ald*100/40:.0f}%)", "45%"],
-                ["其余组合", f"{40-c3_am-c3_ald}/40 ({(40-c3_am-c3_ald)*100/40:.0f}%)", "10%"]],
-               col_widths=[2.5, 2.0, 1.0], font_size=9)
+               [["大胺小醛 (胺环>醛环)", f"{dama}/40 ({dama*100/40:.0f}%)", "45%"],
+                ["大醛小胺 (醛环>胺环)", f"{daan}/40 ({daan*100/40:.0f}%)", "45%"],
+                ["其余 (环数相等)", f"{eq_rings}/40 ({eq_rings*100/40:.0f}%)", "10%"],
+                ["C3-胺 (参考)", f"{c3_am}/40 ({c3_am*100/40:.0f}%)", "(池内自然占比)"],
+                ["C3-醛 (参考)", f"{c3_ald}/40 ({c3_ald*100/40:.0f}%)", "(池内自然占比)"]],
+               col_widths=[2.5, 2.0, 1.5], font_size=9)
 
     # 3.4 高频单体
     _add_heading(doc, "3.4 高频出现单体", level=2)
@@ -497,8 +503,8 @@ def main():
         ["模型架构", "GNN 编码器 (v4 预训练, 256维) + BilinearHead (26维机理描述符)"],
         ["训练策略", "λ_chem=0.005 化学正则化, Focal Loss (α=0.75, γ=2.0)"],
         ["集成打分", "GNN 60% + XGBoost 40% − 0.10×分歧惩罚"],
-        ["C3 分层", "C3-胺 45% + C3-醛 45% + 其余 10%"],
-        ["加成系数", "C3-胺 ×1.15, C3-醛 ×1.10"],
+        ["分层策略", "大胺小醛 45% + 大醛小胺 45% + 其余 10% (按苯环数比较, 非拓扑标签)"],
+        ["加成系数", "C3-胺 ×1.15, C3-醛 ×1.10 (池内排序生效, 保持 C3+C2 占比)"],
         ["直链苯惩罚", "≥3 对位直链苯环 → max(0.4, 1−(n−3)×0.08) 惩罚因子"],
         ["去重", "InChI Key 配对去重，保留最高分"],
     ]
