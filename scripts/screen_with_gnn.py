@@ -227,14 +227,16 @@ def _has_propargyl_ether(mol: Chem.Mol) -> bool:
     return mol.HasSubstructMatch(_PROPARGYL_ETHER)
 
 
-def _check_c2_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> bool:
-    """规则 #5: C2 单体反应苯环上 >4 取代基时，多余取代基必须全部为卤素。
+def _check_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> bool:
+    """规则 #6: 反应苯环上取代基数超限时，多余取代基必须全部为卤素。
 
-    对苯二甲醛衍生物常有 OH/OEt/F 等取代。若取代基数 >4，非卤素取代
-    (如 OH, OMe, OEt, CH3) 会造成位阻过大或电子效应过于复杂。
+    C2: 取代基 >4 → 限卤素; C3: 取代基 >5 → 限卤素。
+    非卤素取代 (OH, OMe, OEt, CH3) 造成位阻过大或电子效应复杂。
     """
-    if topo != "C2":
+    if topo not in ("C2", "C3"):
         return True
+
+    threshold = 5 if topo == "C3" else 4
 
     if n_ald >= 2:
         reactive_smarts = _ALD_SMARTS
@@ -262,7 +264,7 @@ def _check_c2_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> b
                     if nbr_atomic not in _HALOGENS and nbr_atomic not in _H:
                         n_nonhalo_extra += 1
 
-        if n_sub > 4:
+        if n_sub > threshold:
             reactive_ring_positions = set()
             for m in matches:
                 if n_ald >= 2:
@@ -272,7 +274,6 @@ def _check_c2_substituents(mol: Chem.Mol, topo: str, n_ald: int, n_am: int) -> b
                 if ring_c in ring_set:
                     reactive_ring_positions.add(ring_c)
 
-            # non-halogen substituents should only be the reactive groups
             n_reactive = len(reactive_ring_positions)
             if n_nonhalo_extra > n_reactive:
                 return False
@@ -429,8 +430,8 @@ def load_monomer_universe(pool_path: str, meta_path: str,
             n_propargyl += 1
             continue
 
-        # 规则 6: C2 取代基 >4 限卤素 (chem_penalty 覆盖)
-        if use_hard_rules and not _check_c2_substituents(mol, topo, n_ald, n_am):
+        # 规则 6: 取代基超限 → 限卤素 (C2>4, C3>5)
+        if use_hard_rules and not _check_substituents(mol, topo, n_ald, n_am):
             n_c2sub += 1
             continue
 
