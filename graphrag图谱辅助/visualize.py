@@ -230,7 +230,7 @@ html, body {{
 <div id="search-panel">
     <div id="search-box">
         <input type="text" id="search-input" placeholder="搜索: SMILES / 标签 / film:top / f:yes / topo:C3 ..."
-               oninput="doSearch()" autofocus>
+               autofocus>
         <div style="font-size:10px;color:#999;padding:4px 0 0 2px">
           快捷: <b>film:top</b> 成膜率最高 | <b>f:yes</b> 含氟 | <b>n:yes</b> N杂环 |
           <b>type:醛</b> | <b>topo:C3</b> | 也可直接搜 SMILES
@@ -367,36 +367,32 @@ function doSearch() {{
     }}
 }}
 
-// ── Highlight matching nodes in graph ──
+// ── Highlight matching nodes (batched update) ──
 var currentHighlight = new Set();
 function highlightNodes(smiSet) {{
     if (!window.network) return;
-    // Reset previous
-    currentHighlight.forEach(function(id) {{
-        window.monoNodes.forEach(function(n) {{
-            if (window.nodeDataMap[n.id] === id || n.id === id) {{
-                var color = window.nodeOrigColor[n.id] || '#95a5a6';
-                network.body.data.nodes.update({{id: n.id, color: color, opacity: 1}});
-            }}
-        }});
-    }});
-    currentHighlight = new Set(smiSet);
-    // Dim non-matching
+    var updates = [];
+    var matchIds = new Set();
     window.monoNodes.forEach(function(n) {{
         var smi = window.nodeDataMap[n.id] || n.id;
         if (smiSet.has(smi)) {{
-            network.body.data.nodes.update({{id: n.id, opacity: 1, borderWidth: 4}});
+            matchIds.add(n.id);
+            updates.push({{id: n.id, opacity: 1, borderWidth: 4}});
         }} else {{
-            network.body.data.nodes.update({{id: n.id, opacity: 0.25, borderWidth: 1}});
+            updates.push({{id: n.id, opacity: 0.2, borderWidth: 1}});
         }}
     }});
+    currentHighlight = new Set(smiSet);
+    if (updates.length > 0) network.body.data.nodes.update(updates);
 }}
 
 function resetHighlights() {{
     if (!window.network) return;
+    var updates = [];
     window.monoNodes.forEach(function(n) {{
-        network.body.data.nodes.update({{id: n.id, opacity: 1, borderWidth: n.borderWidth || 1}});
+        updates.push({{id: n.id, opacity: 1, borderWidth: n.borderWidth || 1}});
     }});
+    if (updates.length > 0) network.body.data.nodes.update(updates);
 }}
 
 // ── Monomer selection ──
@@ -431,15 +427,17 @@ function focusNodeInGraph(smi) {{
                 if (window.nodeDataMap[n.id] === s || n.id === s) highlight[n.id] = true;
             }});
         }});
+        var updates = [];
         window.monoNodes.forEach(function(n) {{
             if (highlight[n.id]) {{
-                network.body.data.nodes.update({{id: n.id, opacity: 1, borderWidth: 4}});
+                updates.push({{id: n.id, opacity: 1, borderWidth: 4}});
             }} else {{
-                network.body.data.nodes.update({{id: n.id, opacity: 0.15, borderWidth: 1}});
+                updates.push({{id: n.id, opacity: 0.15, borderWidth: 1}});
             }}
         }});
-        window.network.selectNodes([nodeId]);
-        window.network.focus(nodeId, {{scale: 1.2, animation: true}});
+        if (updates.length > 0) network.body.data.nodes.update(updates);
+        network.selectNodes([nodeId]);
+        network.focus(nodeId, {{scale: 1.2, animation: true}});
     }}
 }}
 
@@ -575,6 +573,13 @@ function _status(msg) {{
                 if (item) showLitDetail(item.getAttribute('data-lid'));
             }});
 
+            // Debounced search input
+            var searchTimer = null;
+            document.getElementById('search-input').addEventListener('input', function() {{
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(doSearch, 250);
+            }});
+
             window.network = network;
             window.monoNodes = network.body.data.nodes.get().filter(function(n) {{
                 return !n.id.startsWith('edge_');
@@ -691,7 +696,8 @@ def build_visualization(
           "damping": 0.3
         },
         "minVelocity": 0.75,
-        "solver": "barnesHut"
+        "solver": "barnesHut",
+        "stabilization": {"iterations": 200, "fit": true}
       },
       "interaction": {
         "hover": true,
@@ -758,7 +764,8 @@ def build_visualization(
           "damping": 0.4
         },
         "minVelocity": 0.75,
-        "solver": "barnesHut"
+        "solver": "barnesHut",
+        "stabilization": {"iterations": 200, "fit": true}
       },
       "interaction": {
         "hover": true,
