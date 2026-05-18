@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.chemistry.monomer import _BUILTIN_MONOMERS
 
 # ── 常量 ──
-PREDICTED_EDGE_N = 300        # 筛选结果 Top N
+PREDICTED_EDGE_N = 150        # 筛选结果 Top N (核心图用)
 SVG_SIZE_FULL = (200, 130)    # 全量图 SVG 尺寸 (小)
 SVG_SIZE_CORE = (260, 170)    # 核心图 SVG 尺寸
 
@@ -693,17 +693,36 @@ def build_visualization(
     for ald, am, _ in pred_edges_all:
         pred_smiles.add(ald); pred_smiles.add(am)
 
-    # ── 全量图: 合并后取 Top 300 度最高节点 ──
-    full_G = monomer_G.copy()
-    for smi, c in commercial.items():
-        if smi not in full_G:
-            full_G.add_node(smi, node_type="commercial_monomer",
+    # ── 全量图: Top 150 预测边节点 + 文献配对边 ──
+    top_pred = pred_edges_all[:PREDICTED_EDGE_N]
+    pred_node_ids = set()
+    for ald, am, _ in top_pred:
+        pred_node_ids.add(ald); pred_node_ids.add(am)
+
+    full_G = nx.Graph()
+    # 先加所有预测边节点 (含商业单体)
+    for nid in pred_node_ids:
+        if nid in monomer_G:
+            nd = G.nodes[nid]
+            full_G.add_node(nid, **{k: v for k, v in nd.items()})
+        elif nid in commercial:
+            c = commercial[nid]
+            full_G.add_node(nid, node_type="commercial_monomer",
                            monomer_type=c.get("mtype", "?"),
                            has_fluorine=c.get("has_f", False),
                            has_n_heterocycle=False,
                            n_literatures=0, n_partners=0,
                            label=f"{c.get('name','')} [商业]")
-    for ald, am, score in pred_edges_all:
+        else:
+            full_G.add_node(nid)
+
+    # 加入节点间的文献配对边 (从 monomer_G 提取)
+    for u, v, d in monomer_G.edges(data=True):
+        if u in full_G and v in full_G:
+            full_G.add_edge(u, v, **d)
+
+    # 加入预测边 (不覆盖文献边)
+    for ald, am, score in top_pred:
         if ald not in full_G or am not in full_G:
             continue
         if full_G.has_edge(ald, am):
@@ -712,22 +731,20 @@ def build_visualization(
                        margin_score=round(score, 4),
                        color="#e74c3c", dashes=True)
 
-    # 取度最高 300 节点, 仅保留它们之间的边
-    top300 = sorted(dict(full_G.degree()).items(), key=lambda x: x[1], reverse=True)[:300]
-    top_ids = {n for n, _ in top300}
-    full_G = full_G.subgraph(top_ids).copy()
+    # 过滤度<2 节点
+    full_G.remove_nodes_from([n for n, d in full_G.degree() if d < 2])
 
-    # 关联文献
     full_lit_ids = set()
     for nid in full_G.nodes():
         full_lit_ids.update(monomer_to_lits.get(nid, []))
     lit_full_all = _build_literature_full(yaml_dir, full_lit_ids)
 
     comm_in_full = sum(1 for s in commercial if s in full_G)
-    pred_in_full = sum(1 for _, _, _ in pred_edges_all if full_G.has_edge(_, _))
+    pred_in_full = sum(1 for _, _, _ in top_pred if full_G.has_edge(_, _))
+    lit_edge_cnt = sum(1 for _, _, d in full_G.edges(data=True) if d.get("edge_type") != "PREDICTED")
     print(f"全量图: {full_G.number_of_nodes()} 节点, {full_G.number_of_edges()} 边 "
-          f"(Top300, 含商业 {comm_in_full}, 预测边 {pred_in_full})")
-    print(f"  全量图关联文献: {len(full_lit_ids)} 篇, 有效: {len(lit_full_all)}")
+          f"(文献边 {lit_edge_cnt}, 预测边 {pred_in_full}, 含商业 {comm_in_full})")
+    print(f"  关联文献: {len(full_lit_ids)} 篇, 有效: {len(lit_full_all)}")
 
     # ═══════════════════════════════════════
     # 全量图渲染
@@ -783,26 +800,24 @@ def build_visualization(
           f"其中预测边{pred_count}): {full_path}")
 
     # ═══════════════════════════════════════
-    # 核心子图 (Top 150)
+    # 核心子图: 仅 Top 150 预测边网络
     # ═══════════════════════════════════════
-    degrees = dict(monomer_G.degree())
-    top_nodes = sorted(degrees, key=degrees.get, reverse=True)[:150]
-    core_G = monomer_G.subgraph(top_nodes).copy()
+    core_G_pred = nx.Graph()
+    for ald, am, score in top_pred:
+        core_G_pred.add_node(ald)
+        core_G_pred.add_node(am)
+        core_G_pred.add_edge(ald, am, edge_type="PREDICTED",
+                            margin_score=round(score, 4),
+                            color="#e74c3c", dashes=True)
+    core_G_pred.remove_nodes_from([n for n, d in core_G_pred.degree() if d < 2])
 
     core_lit_ids = set()
-    for nid in core_G.nodes():
+    for nid in core_G_pred.nodes():
         core_lit_ids.update(monomer_to_lits.get(nid, []))
     lit_full_core = _build_literature_full(yaml_dir, core_lit_ids)
     print(f"  核心图关联文献: {len(core_lit_ids)} 篇, 有效: {len(lit_full_core)}")
 
-    # 核心图预测边 (只保留两端都在图中的)
-    core_pred = [(a, b, s) for a, b, s in pred_edges_all if a in core_G and b in core_G]
-    core_G_pred = core_G.copy()
-    for ald, am, score in core_pred:
-        if not core_G_pred.has_edge(ald, am):
-            core_G_pred.add_edge(ald, am, edge_type="PREDICTED",
-                                margin_score=round(score, 4),
-                                color="#e74c3c", dashes=True)
+    core_pred = [(a, b, s) for a, b, s in top_pred if core_G_pred.has_edge(a, b)]
 
     core_net = Network(height="100%", width="100%", bgcolor="#f8f9fa",
                        font_color="#2c3e50", directed=False)
@@ -871,7 +886,7 @@ def _add_legend(html_path: str):
       <span style="color:#27ae60">—</span> 成膜率 ≥ 50%<br/>
       <span style="color:#f39c12">—</span> 成膜率 0–50%<br/>
       <span style="color:#bdc3c7">—</span> 成膜率 = 0<br/>
-      <span style="color:#e74c3c">- -</span> 预测配对 (Top 300)<br/>
+      <span style="color:#e74c3c">- -</span> 预测配对 (Top 150)<br/>
       <hr style="margin:4px 0"/>
       <span>节点大小 ∝ 文献数 | 边宽 ∝ 配对文献数</span>
     </div>
