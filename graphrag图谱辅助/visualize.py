@@ -679,9 +679,7 @@ def build_visualization(
         if d.get("edge_type") != "PAIRED_WITH":
             monomer_G.remove_edge(u, v)
     monomer_G.remove_nodes_from(list(nx.isolates(monomer_G)))
-    # 过滤度<2 的边缘节点，减少全量图渲染压力
-    low_deg = [n for n, d in monomer_G.degree() if d < 2]
-    monomer_G.remove_nodes_from(low_deg)
+    # 度≥2 过滤推迟到商业单体+预测边合并之后，统一筛选
 
     monomer_to_lits = _build_monomer_lit_map(G, monomers)
 
@@ -728,9 +726,13 @@ def build_visualization(
                        margin_score=round(score, 4),
                        color="#e74c3c", dashes=True)
 
+    # 统一过滤度<2 节点 (文献单体 + 商业单体)
+    low_deg_full = [n for n, d in full_G.degree() if d < 2]
+    full_G.remove_nodes_from(low_deg_full)
+
     print(f"全量图: {full_G.number_of_nodes()} 节点, {full_G.number_of_edges()} 边 "
           f"(文献 {monomer_G.number_of_nodes()}/{monomer_G.number_of_edges()}, "
-          f"+商业 {sum(1 for s in commercial if s not in monomer_G)}, "
+          f"+商业 {sum(1 for s in commercial if s in full_G and s not in monomer_G)}, "
           f"+预测 {sum(1 for _,_,_ in pred_edges_all if full_G.has_edge(_,_))})")
 
     # ═══════════════════════════════════════
@@ -742,9 +744,10 @@ def build_visualization(
     var options = {
       "nodes": {"borderWidth": 1, "borderWidthSelected": 3, "font": {"size": 9, "face": "Arial"}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 1.5},
-      "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.2,
-        "springLength": 400, "springConstant": 0.01, "damping": 0.4},
-        "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
+      "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.3,
+        "springLength": 400, "springConstant": 0.01, "damping": 0.6},
+        "maxVelocity": 30, "minVelocity": 1.5, "solver": "barnesHut",
+        "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 150, "navigationButtons": true,
 	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
@@ -814,8 +817,9 @@ def build_visualization(
       "nodes": {"borderWidth": 1.5, "borderWidthSelected": 4, "font": {"size": 11, "face": "Arial", "strokeWidth": 0}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 2, "selectionWidth": 2},
       "physics": {"barnesHut": {"gravitationalConstant": -3000, "centralGravity": 0.3,
-        "springLength": 300, "springConstant": 0.025, "damping": 0.3},
-        "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
+        "springLength": 300, "springConstant": 0.025, "damping": 0.5},
+        "maxVelocity": 25, "minVelocity": 1.5, "solver": "barnesHut",
+        "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 100, "navigationButtons": true, "keyboard": true,
 	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
