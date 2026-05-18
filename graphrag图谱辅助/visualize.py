@@ -229,8 +229,12 @@ html, body {{
 
 <div id="search-panel">
     <div id="search-box">
-        <input type="text" id="search-input" placeholder="搜索单体: SMILES / 标签 / 属性..."
+        <input type="text" id="search-input" placeholder="搜索: SMILES / 标签 / film:top / f:yes / topo:C3 ..."
                oninput="doSearch()" autofocus>
+        <div style="font-size:10px;color:#999;padding:4px 0 0 2px">
+          快捷: <b>film:top</b> 成膜率最高 | <b>f:yes</b> 含氟 | <b>n:yes</b> N杂环 |
+          <b>type:醛</b> | <b>topo:C3</b> | 也可直接搜 SMILES
+        </div>
     </div>
     <div id="search-results"><div class="no-results">输入关键词搜索单体</div></div>
 </div>
@@ -278,19 +282,62 @@ function doSearch() {{
         resetHighlights();
         return;
     }}
+
+    // Special commands
+    var sortMode = 'lit';  // default: sort by n_lit
+    var searchTerm = q;
+    var specialCmds = {{
+        'film:top': 'film', 'film:best': 'film', 'film:desc': 'film',
+        'film:0': 'film0',
+        'f:yes': 'f_yes', 'f:no': 'f_no',
+        'n:yes': 'n_yes',
+        'type:aldehyde': 'type_ald', 'type:amine': 'type_am',
+        'topo:c1': 'topo_c1', 'topo:c2': 'topo_c2', 'topo:c3': 'topo_c3', 'topo:c4': 'topo_c4',
+        'lit:desc': 'lit'
+    }};
+    for (var cmd in specialCmds) {{
+        if (q === cmd || q.indexOf(cmd + ' ') === 0) {{
+            sortMode = specialCmds[cmd];
+            searchTerm = q.substring(cmd.length).trim();
+            break;
+        }}
+    }}
+
+    // Collect results
     var results = [];
     for (var key in MONOMERS) {{
         var m = MONOMERS[key];
+        if (sortMode === 'film') {{ results.push(m); continue; }}
+        if (sortMode === 'film0') {{ if (m.film_rate === 0) results.push(m); continue; }}
+        if (sortMode === 'f_yes') {{ if (m.has_f) results.push(m); continue; }}
+        if (sortMode === 'f_no') {{ if (!m.has_f) results.push(m); continue; }}
+        if (sortMode === 'n_yes') {{ if (m.has_n) results.push(m); continue; }}
+        if (sortMode === 'type_ald') {{ if (m.mtype === 'aldehyde') results.push(m); continue; }}
+        if (sortMode === 'type_am') {{ if (m.mtype === 'amine') results.push(m); continue; }}
+        if (sortMode === 'topo_c1' || sortMode === 'topo_c2' ||
+            sortMode === 'topo_c3' || sortMode === 'topo_c4') {{
+            var t = sortMode.substring(5).toUpperCase();
+            if (m.topo === t) results.push(m);
+            continue;
+        }}
+        // Default text search (also applies to remaining searchTerm)
         var text = (m.full_smi + ' ' + m.label + ' ' + m.mtype + ' ' + m.topo).toLowerCase();
-        if (text.indexOf(q) >= 0) results.push(m);
+        if (searchTerm && text.indexOf(searchTerm) >= 0) results.push(m);
+        else if (!searchTerm) results.push(m);
     }}
+
     if (results.length === 0) {{
         container.innerHTML = '<div class="no-results">无匹配结果</div>';
         resetHighlights();
         return;
     }}
-    // sort by n_lit desc
-    results.sort(function(a,b) {{ return b.n_lit - a.n_lit; }});
+
+    // Sort
+    if (sortMode === 'film') {{
+        results.sort(function(a,b) {{ return b.film_rate - a.film_rate; }});
+    }} else {{
+        results.sort(function(a,b) {{ return b.n_lit - a.n_lit; }});
+    }}
     var html = '';
     var matchSmiSet = new Set();
     for (var i = 0; i < Math.min(results.length, 80); i++) {{
@@ -528,6 +575,15 @@ window.addEventListener('load', function() {{
                 netEl.style.width = 'calc(100% - 400px)';
                 netEl.style.height = '100vh';
             }}
+
+            // Node click → show detail panel
+            network.on('click', function(params) {{
+                if (params.nodes.length === 1) {{
+                    var nid = params.nodes[0];
+                    var smi = window.nodeDataMap[nid];
+                    if (smi) selectMonomer(smi);
+                }}
+            }});
             network.fit();
         }}
     }}, 500);
