@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.chemistry.monomer import _BUILTIN_MONOMERS
 
 # ── 常量 ──
-PREDICTED_EDGE_N = 150        # 筛选结果 Top N (核心图用)
+PREDICTED_EDGE_N = 250        # 筛选结果 Top N (核心图用)
 SVG_SIZE_FULL = (200, 130)    # 全量图 SVG 尺寸 (小)
 SVG_SIZE_CORE = (260, 170)    # 核心图 SVG 尺寸
 
@@ -886,7 +886,7 @@ def _add_legend(html_path: str):
       <span style="color:#27ae60">—</span> 成膜率 ≥ 50%<br/>
       <span style="color:#f39c12">—</span> 成膜率 0–50%<br/>
       <span style="color:#bdc3c7">—</span> 成膜率 = 0<br/>
-      <span style="color:#e74c3c">- -</span> 预测配对 (Top 150)<br/>
+      <span style="color:#e74c3c">- -</span> 预测配对 (Top 250)<br/>
       <hr style="margin:4px 0"/>
       <span>节点大小 ∝ 文献数 | 边宽 ∝ 配对文献数</span>
     </div>
