@@ -679,6 +679,9 @@ def build_visualization(
         if d.get("edge_type") != "PAIRED_WITH":
             monomer_G.remove_edge(u, v)
     monomer_G.remove_nodes_from(list(nx.isolates(monomer_G)))
+    # 过滤度<2 的边缘节点，减少全量图渲染压力
+    low_deg = [n for n, d in monomer_G.degree() if d < 2]
+    monomer_G.remove_nodes_from(low_deg)
 
     monomer_to_lits = _build_monomer_lit_map(G, monomers)
 
@@ -742,7 +745,8 @@ def build_visualization(
       "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.2,
         "springLength": 400, "springConstant": 0.01, "damping": 0.4},
         "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
-      "interaction": {"hover": true, "tooltipDelay": 150, "navigationButtons": true}
+      "interaction": {"hover": true, "tooltipDelay": 150, "navigationButtons": true,
+	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
     """)
 
@@ -812,7 +816,8 @@ def build_visualization(
       "physics": {"barnesHut": {"gravitationalConstant": -3000, "centralGravity": 0.3,
         "springLength": 300, "springConstant": 0.025, "damping": 0.3},
         "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
-      "interaction": {"hover": true, "tooltipDelay": 100, "navigationButtons": true, "keyboard": true}
+      "interaction": {"hover": true, "tooltipDelay": 100, "navigationButtons": true, "keyboard": true,
+	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
     """)
 
