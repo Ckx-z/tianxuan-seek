@@ -345,7 +345,7 @@ html, body {{ height: 100%; margin: 0; padding: 0; overflow: hidden; }}
         <input type="text" id="search-input"
                placeholder="搜索: SMILES / film:top / f:yes / CAS / comm:yes ..." autofocus>
         <div style="font-size:10px;color:#999;padding:4px 0 0 2px">
-          快捷: <b>film:top</b> | <b>f:yes</b> | <b>comm:yes</b> 商业单体 |
+          快捷: <b>film:top</b> (成膜率前3) | <b>film:best</b> (醛/胺各前3) | <b>f:yes</b> | <b>comm:yes</b> |
           <b>type:醛</b> | <b>topo:C3</b>
         </div>
     </div>
@@ -394,7 +394,7 @@ function doSearch() {{
     }}
     var sortMode = 'lit', searchTerm = q;
     var specialCmds = {{
-        'film:top': 'film', 'film:best': 'film', 'film:0': 'film0',
+        'film:top': 'film', 'film:best': 'film_best', 'film:0': 'film0',
         'f:yes': 'f_yes', 'f:no': 'f_no', 'n:yes': 'n_yes',
         'comm:yes': 'comm', 'type:aldehyde': 'type_ald', 'type:amine': 'type_am',
         'topo:c1': 'topo_c1', 'topo:c2': 'topo_c2', 'topo:c3': 'topo_c3', 'topo:c4': 'topo_c4'
@@ -408,6 +408,7 @@ function doSearch() {{
     for (var key in MONOMERS) {{
         var m = MONOMERS[key];
         if (sortMode === 'film') {{ results.push(m); continue; }}
+        if (sortMode === 'film_best') {{ results.push(m); continue; }}
         if (sortMode === 'film0') {{ if (m.film_rate === 0) results.push(m); continue; }}
         if (sortMode === 'f_yes') {{ if (m.has_f) results.push(m); continue; }}
         if (sortMode === 'f_no') {{ if (!m.has_f) results.push(m); continue; }}
@@ -428,11 +429,15 @@ function doSearch() {{
         container.innerHTML = '<div class="no-results">无匹配结果</div>';
         resetHighlights(); return;
     }}
-    if (sortMode === 'film') results.sort(function(a,b){{ return b.film_rate - a.film_rate; }});
-    else results.sort(function(a,b){{ return b.n_lit - a.n_lit; }});
+    if (sortMode === 'film') {{ results.sort(function(a,b){{ return b.film_rate - a.film_rate; }}); }}
+    else if (sortMode === 'film_best') {{
+        var alds = results.filter(function(m){{ return m.mtype === 'aldehyde'; }}).sort(function(a,b){{ return b.film_rate - a.film_rate; }}).slice(0, 3);
+        var ams = results.filter(function(m){{ return m.mtype === 'amine'; }}).sort(function(a,b){{ return b.film_rate - a.film_rate; }}).slice(0, 3);
+        results = alds.concat(ams);
+    }} else {{ results.sort(function(a,b){{ return b.n_lit - a.n_lit; }}); }}
 
     var html = '', matchSet = new Set();
-    var limit = (sortMode === 'film') ? 3 : 80;
+    var limit = sortMode === 'film' ? 3 : (sortMode === 'film_best' ? 6 : 80);
     for (var i = 0; i < Math.min(results.length, limit); i++) {{
         var m = results[i]; matchSet.add(m.full_smi);
         var cls = m.is_commercial ? ' commercial' : '';
