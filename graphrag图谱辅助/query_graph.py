@@ -342,17 +342,86 @@ class GraphQuery:
                 return self.pair_info(smiles_list[0], smiles_list[1])
             return "请提供醛和胺的 SMILES"
 
+        # /top — 成膜率最高的配对
+        if any(w in q for w in ["成膜率最高", "top", "最高", "最佳配对", "成膜最好"]):
+            n = 10
+            import re
+            nums = re.findall(r'\d+', q)
+            if nums:
+                n = int(nums[0])
+            edges_sorted = sorted(
+                self.edges_data,
+                key=lambda x: (x.get("film_ratio", 0), x.get("n_literatures", 0)),
+                reverse=True,
+            )
+            lines = [f"═══ 成膜率最高 Top {n} ═══"]
+            for i, e in enumerate(edges_sorted[:n]):
+                lines.append(
+                    f"  [{i+1:2d}] {e['source'][:40]} + {e['target'][:40]} "
+                    f"文献{e.get('n_literatures', '?')} "
+                    f"成膜率{e.get('film_ratio', 0):.1%}"
+                )
+            return "\n".join(lines)
+
+        # /triazine — 三嗪/杂环相关查询
+        if any(w in q for w in ["三嗪", "triazine", "杂环", "hetero", "吡啶", "卟啉"]):
+            return self.filter_pairs(am_has_n=True)
+
+        # /c3 相关
+        if "c3" in q.lower():
+            if "醛" in q:
+                return self.filter_pairs(ald_topo="C3")
+            if "胺" in q:
+                return self.filter_pairs(am_topo="C3")
+            return self.filter_pairs(ald_topo="C3")
+
+        # /unknown — 未尝试配对
+        if any(w in q for w in ["未尝试", "未知", "新组合", "未被探索"]):
+            # 找度数最高的醛，推荐其未尝试胺
+            ald_degrees = [(n, self.G.degree(n)) for n in self._ald_nodes]
+            ald_degrees.sort(key=lambda x: x[1], reverse=True)
+            top_ald = ald_degrees[0][0] if ald_degrees else None
+            if top_ald:
+                return self.recommend(top_ald, top_n=20)
+            return "无可用醛"
+
         # fallback
         return (
             f"无法解析问题: {question}\n"
             "支持的命令:\n"
-            "  /stats     — 图谱概览\n"
-            "  /monomer <SMILES> — 单体详情\n"
-            "  /pair <醛SMILES> <胺SMILES> — 配对查询\n"
-            "  /filter 含氟醛+非氟胺 — 属性过滤\n"
-            "  /recommend <醛SMILES> — 推荐未尝试配对\n"
-            "  或直接输入自然语言问题 (关键词匹配)"
+            "  /stats      图谱概览\n"
+            "  /monomer <SMILES>  单体详情\n"
+            "  /pair <醛> <胺>    配对查询\n"
+            "  /filter 含氟醛+非氟胺  属性过滤\n"
+            "  /recommend <醛SMILES>  推荐未尝试配对\n"
+            "  /top 10      成膜率最高 Top N\n"
+            "  三嗪胺 / C3醛 / 未尝试 / 成膜率最高\n"
+            "  或直接输入自然语言问题"
         )
+
+
+def _print_help():
+    print("""
+╔══════════════════════════════════════════════════════════╗
+║           COF 知识图谱查询 — 交互模式                      ║
+╠══════════════════════════════════════════════════════════╣
+║  内置命令:                                                ║
+║    /stats      图谱概览 (节点/边/成膜率分布)               ║
+║    /monomer <SMILES>  单体详情 (文献/配对/成膜率)         ║
+║    /pair <醛> <胺>    配对查询 (成膜/条件/来源)           ║
+║    /filter <条件>     属性过滤 (含氟/拓扑/N杂环)          ║
+║    /recommend <醛>    推荐未尝试胺 (共同邻居算法)         ║
+║    /top <N>           最高成膜率 Top N 配对               ║
+║    /help              显示此帮助                          ║
+║    quit / q           退出                                ║
+╠══════════════════════════════════════════════════════════╣
+║  自然语言示例:                                            ║
+║    含氟醛配非氟胺的成膜率                                 ║
+║    三嗪胺有哪些配对                                       ║
+║    C3醛推荐新胺                                           ║
+║    成膜率最高的10个配对                                    ║
+╚══════════════════════════════════════════════════════════╝
+""")
 
 
 def main():
@@ -365,22 +434,60 @@ def main():
     gq = GraphQuery()
 
     if args.interactive:
-        print("\nCOF 知识图谱查询 (输入 /help 查看命令, 输入 quit 退出)\n")
+        _print_help()
         while True:
             try:
-                q = input("query> ").strip()
+                q = input("\nquery> ").strip()
             except (EOFError, KeyboardInterrupt):
+                print()
                 break
             if not q:
                 continue
             if q.lower() in ("quit", "exit", "q"):
+                print("再见")
                 break
-            if q == "/help":
-                print("命令: /stats /monomer <smi> /pair <smi1> <smi2>")
-                print("      /filter <条件> /recommend <smi> /ask <问题>")
+            if q in ("/help", "help", "h", "?"):
+                _print_help()
                 continue
-            print(gq.ask(q))
-            print()
+
+            # 快捷命令解析
+            parts = q.split(maxsplit=1)
+            cmd = parts[0].lower()
+            arg = parts[1] if len(parts) > 1 else ""
+
+            if cmd == "/stats":
+                print(gq.stats())
+            elif cmd == "/monomer":
+                print(gq.monomer_info(arg) if arg else "请提供 SMILES")
+            elif cmd == "/pair":
+                smis = arg.split()
+                if len(smis) >= 2:
+                    print(gq.pair_info(smis[0], smis[1]))
+                else:
+                    print("请提供 醛SMILES 胺SMILES")
+            elif cmd == "/filter":
+                print(gq.ask(arg if arg else "含氟"))
+            elif cmd == "/recommend":
+                print(gq.recommend(arg) if arg else "请提供醛 SMILES")
+            elif cmd == "/top":
+                try:
+                    n = int(arg) if arg else 10
+                except ValueError:
+                    n = 10
+                edges_sorted = sorted(
+                    gq.edges_data,
+                    key=lambda x: x.get("film_ratio", 0),
+                    reverse=True,
+                )
+                print(f"═══ 成膜率 Top {n} ═══")
+                for i, e in enumerate(edges_sorted[:n]):
+                    print(
+                        f"  [{i+1:2d}] {e['source'][:35]} + {e['target'][:35]} "
+                        f"文献{e.get('n_literatures', '?')} "
+                        f"成膜率{e.get('film_ratio', 0):.1%}"
+                    )
+            else:
+                print(gq.ask(q))
     else:
         query = " ".join(args.query) if args.query else "/stats"
         print(gq.ask(query))
