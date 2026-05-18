@@ -432,7 +432,8 @@ function doSearch() {{
     else results.sort(function(a,b){{ return b.n_lit - a.n_lit; }});
 
     var html = '', matchSet = new Set();
-    for (var i = 0; i < Math.min(results.length, 80); i++) {{
+    var limit = (sortMode === 'film') ? 3 : 80;
+    for (var i = 0; i < Math.min(results.length, limit); i++) {{
         var m = results[i]; matchSet.add(m.full_smi);
         var cls = m.is_commercial ? ' commercial' : '';
         var smiShort = m.full_smi.length > 55 ? m.full_smi.substring(0,52)+'...' : m.full_smi;
