@@ -168,9 +168,27 @@ def _build_monomer_lit_map(G, monomers: set) -> dict:
     return {k: sorted(v) for k, v in mono_to_lits.items()}
 
 
-def _build_literature_full(yaml_dir: str, lit_ids_set: set) -> dict:
+def _build_pdf_map(pdfs_dir: str) -> dict:
+    """扫描 PDF 目录, 返回 {literature_id: relative_path} 映射。"""
+    pdf_map = {}
+    pdf_root = Path(pdfs_dir)
+    if not pdf_root.is_dir():
+        return pdf_map
+    for pdf_file in pdf_root.rglob("*.pdf"):
+        lid = pdf_file.stem
+        try:
+            rel = str(pdf_file.relative_to(pdf_root.parent))
+        except ValueError:
+            rel = str(pdf_file)
+        pdf_map[lid] = rel
+    return pdf_map
+
+
+def _build_literature_full(yaml_dir: str, lit_ids_set: set, pdf_map: dict = None) -> dict:
     yaml_dir_path = Path(yaml_dir)
     yaml_files = {f.stem: str(f) for f in yaml_dir_path.glob("*.yaml")}
+    if pdf_map is None:
+        pdf_map = {}
     full_db = {}
     for lid in lit_ids_set:
         if lid not in yaml_files: continue
@@ -202,6 +220,7 @@ def _build_literature_full(yaml_dir: str, lit_ids_set: set) -> dict:
             "conclusion_3": str(data.get("conclusion_3", ""))[:400],
             "innovation": str(data.get("innovation", ""))[:400],
             "methods": str(data.get("methods", ""))[:300],
+            "pdf_path": pdf_map.get(lid, f"data/pdfs/{lid}.pdf"),
         }
     return full_db
 
@@ -567,9 +586,11 @@ function showDetail(smi) {{
             var lid=m.lits[i], lit=LITERATURES[lid];
             var lidShort = lid.length>80 ? lid.substring(0,77)+'...' : lid;
             if (lit) {{
+                var pdfRef = lit.pdf_path||('data/pdfs/'+lid+'.pdf');
                 html += '<div class="mono-lit-item" data-lid="'+lid.replace(/"/g,'&quot;').replace(/'/g,'&#39;')+'">'+
                     '<b>#'+(i+1)+'</b> '+lidShort+'<br>'+
-                    '<span style="font-size:11px;color:#666">'+(lit.system||'').substring(0,80)+'</span></div>';
+                    '<span style="font-size:11px;color:#666">'+(lit.system||'').substring(0,80)+'</span>'+
+                    '<br><span style="font-size:10px;color:#999"> PDF: '+pdfRef+'</span></div>';
             }} else {{
                 html += '<div class="mono-lit-item" style="color:#999"><b>#'+(i+1)+'</b> '+lidShort+' (无数据)</div>';
             }}
@@ -589,13 +610,13 @@ var LIT_LABELS = {{
     'fluorine_monomer': '含氟单体', 'film_crystallinity_fluorine': '成膜/结晶度/氟',
     'adsorption_mechanism': '吸附机理', 'computational_methods': '计算方法',
     'conclusion_1': '实验结论 1', 'conclusion_2': '实验结论 2', 'conclusion_3': '实验结论 3',
-    'innovation': '创新点', 'methods': '表征方法'
+    'innovation': '创新点', 'methods': '表征方法', 'pdf_path': 'PDF 文件'
 }};
 var LIT_ORDER = ['journal','system','reagent','catalyst','solvent','reaction_temperature',
     'synthesis_mode','synthesis_route','interface_type','annealing_conditions',
     'schiff_base_kinetics','fluorine_effects','fluorine_monomer','film_crystallinity_fluorine',
     'adsorption_mechanism','computational_methods','conclusion_1','conclusion_2','conclusion_3',
-    'innovation','methods'];
+    'innovation','methods','pdf_path'];
 
 function showLitDetail(lid) {{
     var lit = LITERATURES[lid]; if (!lit) return;
@@ -783,7 +804,8 @@ def build_visualization(
     full_lit_ids = set()
     for nid in full_G.nodes():
         full_lit_ids.update(monomer_to_lits.get(nid, []))
-    lit_full_all = _build_literature_full(yaml_dir, full_lit_ids)
+    pdf_map = _build_pdf_map("data/pdfs")
+    lit_full_all = _build_literature_full(yaml_dir, full_lit_ids, pdf_map)
 
     comm_in_full = sum(1 for s in commercial if s in full_G)
     pred_in_full = sum(1 for _, _, _ in top_pred if full_G.has_edge(_, _))
@@ -859,7 +881,7 @@ def build_visualization(
     core_lit_ids = set()
     for nid in core_G_pred.nodes():
         core_lit_ids.update(monomer_to_lits.get(nid, []))
-    lit_full_core = _build_literature_full(yaml_dir, core_lit_ids)
+    lit_full_core = _build_literature_full(yaml_dir, core_lit_ids, pdf_map)
     print(f"  核心图关联文献: {len(core_lit_ids)} 篇, 有效: {len(lit_full_core)}")
 
     core_pred = [(a, b, s) for a, b, s in top_pred if core_G_pred.has_edge(a, b)]
