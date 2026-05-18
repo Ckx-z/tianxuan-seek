@@ -42,7 +42,6 @@ BATCH_SIZE = 64
 
 # ── Phase 2 硬规则 ──
 MAX_AROMATIC_RINGS = 5  # 总芳环数 (苯环+杂芳环) 上限
-HETEROCYCLE_PENALTY = 0.85
 
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
 _AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")          # 仅芳香伯胺 (排除酰肼、脂肪胺、磺酰胺)

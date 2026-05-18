@@ -125,12 +125,11 @@ class FocalLoss(nn.Module):
 
 
 def ranking_loss(logits, ald_acet, am_acet, labels=None, margin=0.05,
-                 pos_acet_weight=0.2):
+                 pos_acet_weight=1.0):
     """惩罚含炔对得分高于纯苯对的排序错误。
 
     化学先验: 苯环共轭稳定亚胺键 > 炔基刚性弱共轭。
-    pos_acet_weight: 含炔正样本的排序损失权重 (默认为 0.2),
-                     避免过度压制侥幸成膜的含炔案例。
+    pos_acet_weight: 含炔正样本的排序损失权重 (默认 1.0, 无降权)。
     仅当批内同时存在苯对和含炔对时才生效。
     """
     benzene_mask = ~(ald_acet | am_acet)
