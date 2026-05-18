@@ -275,6 +275,7 @@ function togglePanel() {{
 
 // ── Search ──
 function doSearch() {{
+    try {{
     var q = document.getElementById('search-input').value.toLowerCase().trim();
     var container = document.getElementById('search-results');
     if (!q) {{
@@ -346,7 +347,7 @@ function doSearch() {{
         var fCls = m.has_f ? 'f-true' : 'f-false';
         var nCls = m.has_n ? 'n-true' : 'n-false';
         var smiShort = m.full_smi.length > 55 ? m.full_smi.substring(0, 52) + '...' : m.full_smi;
-        html += '<div class="result-item" onclick="selectMonomer(this.getAttribute(\'data-smi\'))" data-smi="' +
+        html += '<div class="result-item" data-smi="' +
                 m.full_smi.replace(/"/g, '&quot;').replace(/'/g, '&#39;') + '">' +
                 '<b>' + m.label + '</b> [' + m.mtype + ' | ' + m.topo + ']<br>' +
                 '<span style="font-size:11px;color:#888">' + smiShort + '</span>' +
@@ -359,6 +360,11 @@ function doSearch() {{
     }}
     container.innerHTML = html;
     highlightNodes(matchSmiSet);
+    }} catch(e) {{
+        var container = document.getElementById('search-results');
+        if (container) container.innerHTML = '<div class=\"no-results\" style=\"color:red\">JS Error: ' + e.message + '</div>';
+        console.error(e);
+    }}
 }}
 
 // ── Highlight matching nodes in graph ──
@@ -477,7 +483,7 @@ function showDetail(smi) {{
         var lit = LITERATURES[lid];
         var lidShort = lid.length > 80 ? lid.substring(0, 77) + '...' : lid;
         if (lit) {{
-            html += '<div class="mono-lit-item" onclick="showLitDetail(this.getAttribute(\'data-lid\'))" data-lid="' +
+            html += '<div class="mono-lit-item" data-lid="' +
                 lid.replace(/"/g, '&quot;').replace(/'/g, '&#39;') + '">' +
                 '<b>#' + (i + 1) + '</b> ' + lidShort + '<br>' +
                 '<span style="font-size:11px;color:#666">溶剂: ' +
@@ -538,10 +544,37 @@ function closeDetail() {{
     resetHighlights();
 }}
 
+// ── Debug: show init status ──
+var statusEl = document.getElementById('search-results');
+function _status(msg) {{
+    if (statusEl) statusEl.innerHTML = '<div class=\"no-results\">' + msg + '</div>';
+    console.log('[GraphUI]', msg);
+}}
+
 // ── Init after pyvis loads ──
-window.addEventListener('load', function() {{
-    setTimeout(function() {{
-        if (typeof network !== 'undefined') {{
+(function initGraphUI() {{
+    _status('初始化中...');
+    if (typeof vis === 'undefined') {{ _status('ERROR: vis.js CDN 未加载'); return; }}
+    if (typeof network === 'undefined') {{ _status('ERROR: pyvis network 未定义'); return; }}
+    if (typeof MONOMERS === 'undefined') {{ _status('ERROR: MONOMERS 数据未加载'); return; }}
+
+    var attempts = 0;
+    function wire() {{
+        if (typeof network !== 'undefined' && network.body) {{
+            _status('图谱就绪 — 输入关键词搜索单体');
+
+            // Event delegation for search results (avoids escaping hell)
+            document.getElementById('search-results').addEventListener('click', function(e) {{
+                var item = e.target.closest('.result-item');
+                if (item) selectMonomer(item.getAttribute('data-smi'));
+            }});
+
+            // Event delegation for literature items
+            document.getElementById('detail-body').addEventListener('click', function(e) {{
+                var item = e.target.closest('.mono-lit-item');
+                if (item) showLitDetail(item.getAttribute('data-lid'));
+            }});
+
             window.network = network;
             window.monoNodes = network.body.data.nodes.get().filter(function(n) {{
                 return !n.id.startsWith('edge_');
@@ -550,7 +583,6 @@ window.addEventListener('load', function() {{
             window.nodeOrigColor = {{}};
             window.monoNodes.forEach(function(n) {{
                 window.nodeOrigColor[n.id] = n.color;
-                // Check if n.id is a SMILES matching a MONOMERS key
                 for (var k in MONOMERS) {{
                     if (MONOMERS[k].full_smi === n.id) {{
                         window.nodeDataMap[n.id] = MONOMERS[k].full_smi;
@@ -558,7 +590,6 @@ window.addEventListener('load', function() {{
                     }}
                 }}
                 if (!window.nodeDataMap[n.id]) {{
-                    // Try partial match: SMILES prefix
                     for (var k in MONOMERS) {{
                         if (n.id.indexOf(k) >= 0 && k.length > 10) {{
                             window.nodeDataMap[n.id] = MONOMERS[k].full_smi;
@@ -568,7 +599,7 @@ window.addEventListener('load', function() {{
                 }}
                 if (!window.nodeDataMap[n.id]) window.nodeDataMap[n.id] = n.id;
             }});
-            // Set size for side panel layout
+
             var netEl = document.getElementById('mynetwork');
             if (netEl) {{
                 netEl.style.marginRight = '400px';
@@ -576,7 +607,7 @@ window.addEventListener('load', function() {{
                 netEl.style.height = '100vh';
             }}
 
-            // Node click → show detail panel
+            // Node click -> detail panel
             network.on('click', function(params) {{
                 if (params.nodes.length === 1) {{
                     var nid = params.nodes[0];
@@ -585,9 +616,13 @@ window.addEventListener('load', function() {{
                 }}
             }});
             network.fit();
+            return;
         }}
-    }}, 500);
-}});
+        attempts++;
+        if (attempts < 50) setTimeout(wire, 200);
+    }}
+    wire();
+}})();
 </script>"""
 
     with open(html_path, "r", encoding="utf-8") as f:
