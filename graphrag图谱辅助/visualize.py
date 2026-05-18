@@ -205,11 +205,23 @@ def _inject_search_panel(html_path: str, monomer_to_lits: dict,
 
 .no-results {{ text-align:center; color:#999; padding:30px; font-size:14px; }}
 
+/* Force full height for all ancestors */
+html, body {{
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}}
+
 /* Override pyvis default layout — make room for side panel */
 #mynetwork {{
     margin-right: 400px !important;
-    width: auto !important;
+    width: calc(100% - 400px) !important;
+    height: 100vh !important;
     float: none !important;
+    position: absolute !important;
+    top: 0;
+    left: 0;
 }}
 </style>
 
@@ -246,10 +258,12 @@ function togglePanel() {{
         p.classList.add('collapsed'); btn.classList.add('collapsed');
         btn.textContent = '▶ 搜索';
         netEl.style.marginRight = '0';
+        netEl.style.width = '100%';
     }} else {{
         p.classList.remove('collapsed'); btn.classList.remove('collapsed');
         btn.textContent = '◀ 搜索';
         netEl.style.marginRight = '400px';
+        netEl.style.width = 'calc(100% - 400px)';
     }}
     panelVisible = !panelVisible;
     if (window.network) window.network.fit();
@@ -507,9 +521,13 @@ window.addEventListener('load', function() {{
                 }}
                 if (!window.nodeDataMap[n.id]) window.nodeDataMap[n.id] = n.id;
             }});
-            // Set margin for side panel
+            // Set size for side panel layout
             var netEl = document.getElementById('mynetwork');
-            if (netEl) netEl.style.marginRight = '400px';
+            if (netEl) {{
+                netEl.style.marginRight = '400px';
+                netEl.style.width = 'calc(100% - 400px)';
+                netEl.style.height = '100vh';
+            }}
             network.fit();
         }}
     }}, 500);
