@@ -478,6 +478,9 @@ function resetHighlights() {{
 
 // ── Monomer selection ──
 var selectedSmi = null;
+function _topPartners(smi) {{
+    return (window.topPartners && window.topPartners[smi]) || [];
+}}
 function selectMonomer(smi) {{
     selectedSmi = smi;
     var items = document.querySelectorAll('#search-results .result-item');
@@ -489,14 +492,26 @@ function selectMonomer(smi) {{
 function focusNodeInGraph(smi) {{
     var nodeId = null;
     window.monoNodes.forEach(function(n){{if(window.nodeDataMap[n.id]===smi||n.id===smi)nodeId=n.id;}});
-    if (nodeId) {{
-        var h={{}}; h[nodeId]=true;
-        currentHighlight.forEach(function(s){{window.monoNodes.forEach(function(n){{if(window.nodeDataMap[n.id]===s||n.id===s)h[n.id]=true;}});}});
-        var updates = [];
-        window.monoNodes.forEach(function(n){{if(h[n.id])updates.push({{id:n.id,opacity:1,borderWidth:4}});else updates.push({{id:n.id,opacity:0.15,borderWidth:1}});}});
-        if (updates.length>0) network.body.data.nodes.update(updates);
-        network.selectNodes([nodeId]); network.focus(nodeId,{{scale:1.2,animation:true}});
-    }}
+    if (!nodeId) return;
+    var partners = _topPartners(smi);
+    var h={{}}; h[nodeId]=true;
+    // 加入当前高亮 + top3 配对单体
+    currentHighlight.forEach(function(s){{window.monoNodes.forEach(function(n){{if(window.nodeDataMap[n.id]===s||n.id===s)h[n.id]=true;}});}});
+    partners.forEach(function(p){{window.monoNodes.forEach(function(n){{if(window.nodeDataMap[n.id]===p.smi||n.id===p.smi)h[n.id]=true;}});}});
+    var updates = [];
+    window.monoNodes.forEach(function(n){{
+        if (n.id === nodeId) {{
+            updates.push({{id:n.id, opacity:1, borderWidth:5, color:{{border:'#e74c3c'}}}});
+        }} else if (h[n.id]) {{
+            var isPartner = partners.some(function(p){{return window.nodeDataMap[n.id]===p.smi||n.id===p.smi;}});
+            if (isPartner) updates.push({{id:n.id, opacity:1, borderWidth:4, color:{{border:'#f39c12'}}}});
+            else updates.push({{id:n.id, opacity:0.8, borderWidth:3}});
+        }} else {{
+            updates.push({{id:n.id, opacity:0.1, borderWidth:1}});
+        }}
+    }});
+    if (updates.length>0) network.body.data.nodes.update(updates);
+    network.selectNodes([nodeId]); network.focus(nodeId,{{scale:1.2,animation:true}});
 }}
 
 // ── Detail: monomer ──
@@ -528,6 +543,23 @@ function showDetail(smi) {{
         '<tr><td>文献数</td><td>'+m.n_lit+'</td></tr>'+
         '<tr><td>成膜率</td><td>'+(m.film_rate*100).toFixed(1)+'%</td></tr>'+
         '</table></div>';
+    // Top 3 预测配对
+    var partners = _topPartners(m.full_smi);
+    if (partners.length > 0) {{
+        html += '<div class="detail-section"><h4>预测配对 Top 3 (margin)</h4>';
+        for (var p=0;p<partners.length;p++) {{
+            var psm = partners[p]; var pm = MONOMERS[psm.smi.substring(0,60)]||{{}};
+            var plabel = pm.label || psm.smi.substring(0,30);
+            var prate = pm.film_rate ? (pm.film_rate*100).toFixed(0)+'%' : '?';
+            html += '<div class="mono-lit-item partner-item" style="border-left:3px solid #f39c12" data-smi="'+
+                psm.smi.replace(/"/g,'&quot;').replace(/'/g,'&#39;')+'">'+
+                '<b>#'+(p+1)+'</b> '+plabel+
+                ' <span style="color:#e67e22;font-size:11px">margin:'+psm.score.toFixed(4)+'</span>'+
+                '<br><span style="font-size:11px;color:#888">'+(psm.smi.length>55?psm.smi.substring(0,52)+'...':psm.smi)+'</span>'+
+                '</div>';
+        }}
+        html += '</div>';
+    }}
     // 来源文章
     if (m.lits.length > 0) {{
         html += '<div class="detail-section"><h4>来源文章 ('+m.lits.length+' 篇)</h4>';
@@ -608,7 +640,10 @@ function _status(m){{ if (statusEl) statusEl.innerHTML = '<div class=\"no-result
                 var item = e.target.closest('.result-item'); if (item) selectMonomer(item.getAttribute('data-smi'));
             }});
             document.getElementById('detail-body').addEventListener('click', function(e){{
-                var item = e.target.closest('.mono-lit-item'); if (item) showLitDetail(item.getAttribute('data-lid'));
+                var item = e.target.closest('.partner-item');
+                if (item) {{ selectMonomer(item.getAttribute('data-smi')); return; }}
+                item = e.target.closest('.mono-lit-item');
+                if (item) showLitDetail(item.getAttribute('data-lid'));
             }});
             var searchTimer = null;
             document.getElementById('search-input').addEventListener('input', function(){{
@@ -632,6 +667,19 @@ function _status(m){{ if (statusEl) statusEl.innerHTML = '<div class=\"no-result
             var netEl = document.getElementById('mynetwork');
             if (netEl) {{
                 netEl.style.marginRight = '400px'; netEl.style.width = 'calc(100% - 400px)'; netEl.style.height = '100vh';
+            }}
+
+            // 构建预测配对 Top 3 查找表
+            window.topPartners = {{}};
+            PREDICTED_EDGES.forEach(function(e){{
+                if (!window.topPartners[e.ald]) window.topPartners[e.ald] = [];
+                if (!window.topPartners[e.am]) window.topPartners[e.am] = [];
+                window.topPartners[e.ald].push({{smi: e.am, score: e.score}});
+                window.topPartners[e.am].push({{smi: e.ald, score: e.score}});
+            }});
+            for (var k in window.topPartners) {{
+                window.topPartners[k].sort(function(a,b){{return b.score - a.score;}});
+                window.topPartners[k] = window.topPartners[k].slice(0, 3);
             }}
 
             network.on('click', function(params){{
