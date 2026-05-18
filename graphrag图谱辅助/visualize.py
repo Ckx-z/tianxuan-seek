@@ -693,21 +693,8 @@ def build_visualization(
     for ald, am, _ in pred_edges_all:
         pred_smiles.add(ald); pred_smiles.add(am)
 
-    # ── 为两个图分别准备 ──
-    # 全量图关联文献 ID
-    all_lit_ids = set()
-    for nid in monomer_G.nodes():
-        all_lit_ids.update(monomer_to_lits.get(nid, []))
-    # 预测边单体可能有关联文献 (如果它们也在图中)
-    for smi in pred_smiles:
-        if smi in monomer_to_lits:
-            all_lit_ids.update(monomer_to_lits[smi])
-    lit_full_all = _build_literature_full(yaml_dir, all_lit_ids)
-    print(f"  全量图关联文献: {len(all_lit_ids)} 篇, 有效: {len(lit_full_all)}")
-
-    # 全量图: 准备添加商业 + 预测边的 merged graph
+    # ── 全量图: 合并后取 Top 300 度最高节点 ──
     full_G = monomer_G.copy()
-    # 添加纯商业节点 (不在文献图中的)
     for smi, c in commercial.items():
         if smi not in full_G:
             full_G.add_node(smi, node_type="commercial_monomer",
@@ -716,24 +703,31 @@ def build_visualization(
                            has_n_heterocycle=False,
                            n_literatures=0, n_partners=0,
                            label=f"{c.get('name','')} [商业]")
-    # 添加预测边
     for ald, am, score in pred_edges_all:
         if ald not in full_G or am not in full_G:
             continue
         if full_G.has_edge(ald, am):
-            continue  # 文献已验证的边优先
+            continue
         full_G.add_edge(ald, am, edge_type="PREDICTED",
                        margin_score=round(score, 4),
                        color="#e74c3c", dashes=True)
 
-    # 统一过滤度<2 节点 (文献单体 + 商业单体)
-    low_deg_full = [n for n, d in full_G.degree() if d < 2]
-    full_G.remove_nodes_from(low_deg_full)
+    # 取度最高 300 节点, 仅保留它们之间的边
+    top300 = sorted(dict(full_G.degree()).items(), key=lambda x: x[1], reverse=True)[:300]
+    top_ids = {n for n, _ in top300}
+    full_G = full_G.subgraph(top_ids).copy()
 
+    # 关联文献
+    full_lit_ids = set()
+    for nid in full_G.nodes():
+        full_lit_ids.update(monomer_to_lits.get(nid, []))
+    lit_full_all = _build_literature_full(yaml_dir, full_lit_ids)
+
+    comm_in_full = sum(1 for s in commercial if s in full_G)
+    pred_in_full = sum(1 for _, _, _ in pred_edges_all if full_G.has_edge(_, _))
     print(f"全量图: {full_G.number_of_nodes()} 节点, {full_G.number_of_edges()} 边 "
-          f"(文献 {monomer_G.number_of_nodes()}/{monomer_G.number_of_edges()}, "
-          f"+商业 {sum(1 for s in commercial if s in full_G and s not in monomer_G)}, "
-          f"+预测 {sum(1 for _,_,_ in pred_edges_all if full_G.has_edge(_,_))})")
+          f"(Top300, 含商业 {comm_in_full}, 预测边 {pred_in_full})")
+    print(f"  全量图关联文献: {len(full_lit_ids)} 篇, 有效: {len(lit_full_all)}")
 
     # ═══════════════════════════════════════
     # 全量图渲染
