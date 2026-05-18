@@ -1,0 +1,568 @@
+{
+  "n_nodes": 1763,
+  "n_edges": 1882,
+  "n_monomers": 809,
+  "n_literatures": 954,
+  "n_paired_edges": 1024,
+  "degree_top20": [
+    {
+      "smiles": "O=Cc1c(O)c(C=O)c(O)c(C=O)c1O",
+      "degree": 144,
+      "monomer_type": "aldehyde",
+      "n_literatures": 83,
+      "film_rate": 0.337
+    },
+    {
+      "smiles": "Nc1ccc(N)cc1",
+      "degree": 105,
+      "monomer_type": "amine",
+      "n_literatures": 82,
+      "film_rate": 0.378
+    },
+    {
+      "smiles": "O=Cc1ccc(C=O)cc1",
+      "degree": 94,
+      "monomer_type": "aldehyde",
+      "n_literatures": 62,
+      "film_rate": 0.274
+    },
+    {
+      "smiles": "O=Cc1cc(C=O)cc(C=O)c1",
+      "degree": 71,
+      "monomer_type": "aldehyde",
+      "n_literatures": 53,
+      "film_rate": 0.321
+    },
+    {
+      "smiles": "Nc1ccc(-c2cc(-c3ccc(N)cc3)cc(-c3ccc(N)cc3)c2)cc1",
+      "degree": 66,
+      "monomer_type": "amine",
+      "n_literatures": 46,
+      "film_rate": 0.348
+    },
+    {
+      "smiles": "Nc1ccc(-c2ccc(N)cc2)cc1",
+      "degree": 44,
+      "monomer_type": "amine",
+      "n_literatures": 35,
+      "film_rate": 0.286
+    },
+    {
+      "smiles": "Nc1ccc(-c2nc(-c3ccc(N)cc3)nc(-c3ccc(N)cc3)n2)cc1",
+      "degree": 42,
+      "monomer_type": "amine",
+      "n_literatures": 31,
+      "film_rate": 0.226
+    },
+    {
+      "smiles": "COc1cc(C=O)ccc1C=O",
+      "degree": 36,
+      "monomer_type": "aldehyde",
+      "n_literatures": 22,
+      "film_rate": 0.318
+    },
+    {
+      "smiles": "O=Cc1ccc(-c2nc(-c3ccc(C=O)cc3)nc(-c3ccc(C=O)cc3)n2)cc1",
+      "degree": 31,
+      "monomer_type": "aldehyde",
+      "n_literatures": 21,
+      "film_rate": 0.333
+    },
+    {
+      "smiles": "NN",
+      "degree": 27,
+      "monomer_type": "amine",
+      "n_literatures": 18,
+      "film_rate": 0.167
+    },
+    {
+      "smiles": "Nc1ccc(N(c2ccc(N)cc2)c2ccc(N)cc2)cc1",
+      "degree": 25,
+      "monomer_type": "amine",
+      "n_literatures": 21,
+      "film_rate": 0.429
+    },
+    {
+      "smiles": "Nc1ccc(C(c2ccc(N)cc2)(c2ccc(N)cc2)c2ccc(N)cc2)cc1",
+      "degree": 25,
+      "monomer_type": "amine",
+      "n_literatures": 17,
+      "film_rate": 0.176
+    },
+    {
+      "smiles": "O=Cc1cc(O)c(C=O)c(C=O)c1",
+      "degree": 23,
+      "monomer_type": "aldehyde",
+      "n_literatures": 15,
+      "film_rate": 0.667
+    },
+    {
+      "smiles": "O=Cc1ccc(-c2ccc(C=O)cc2)cc1",
+      "degree": 22,
+      "monomer_type": "aldehyde",
+      "n_literatures": 14,
+      "film_rate": 0.571
+    },
+    {
+      "smiles": "O=Cc1cc(O)cc(C=O)c1",
+      "degree": 19,
+      "monomer_type": "aldehyde",
+      "n_literatures": 13,
+      "film_rate": 0.154
+    },
+    {
+      "smiles": "O=Cc1cccc(C=O)c1",
+      "degree": 19,
+      "monomer_type": "aldehyde",
+      "n_literatures": 12,
+      "film_rate": 0.5
+    },
+    {
+      "smiles": "O=Cc1ccc(C=O)c(C=O)c1",
+      "degree": 18,
+      "monomer_type": "aldehyde",
+      "n_literatures": 11,
+      "film_rate": 0.273
+    },
+    {
+      "smiles": "Nc1ccc(-c2ccccc2)cc1",
+      "degree": 18,
+      "monomer_type": "amine",
+      "n_literatures": 12,
+      "film_rate": 0.667
+    },
+    {
+      "smiles": "O=Cc1cc(O)cc(C=O)c1C=O",
+      "degree": 18,
+      "monomer_type": "aldehyde",
+      "n_literatures": 11,
+      "film_rate": 0.455
+    },
+    {
+      "smiles": "O=Cc1cc(O)c(C=O)cc1O",
+      "degree": 17,
+      "monomer_type": "aldehyde",
+      "n_literatures": 11,
+      "film_rate": 0.364
+    }
+  ],
+  "film_rate_stats": {
+    "mean": 0.28167737948084054,
+    "median": 0.0,
+    "std": 0.4168900410170405,
+    "p25": 0.0,
+    "p75": 0.571
+  },
+  "fluorine_distribution": {
+    "f_aldehyde": 27,
+    "f_amine": 30,
+    "nonf_aldehyde": 317,
+    "nonf_amine": 421
+  },
+  "fluorine_strategy_stats": {
+    "ald=nF_am=nF": {
+      "count": 930,
+      "film_pos": 269,
+      "film_neg": 662,
+      "film_rate": 0.289
+    },
+    "ald=nF_am=F": {
+      "count": 36,
+      "film_pos": 12,
+      "film_neg": 25,
+      "film_rate": 0.324
+    },
+    "ald=F_am=nF": {
+      "count": 56,
+      "film_pos": 26,
+      "film_neg": 31,
+      "film_rate": 0.456
+    },
+    "ald=F_am=F": {
+      "count": 2,
+      "film_pos": 0,
+      "film_neg": 2,
+      "film_rate": 0.0
+    }
+  },
+  "topology_pair_stats": {
+    "C1+C1": {
+      "count": 62,
+      "film_pos": 9,
+      "film_neg": 56,
+      "film_rate": 0.138
+    },
+    "C1+C2": {
+      "count": 62,
+      "film_pos": 16,
+      "film_neg": 46,
+      "film_rate": 0.258
+    },
+    "C1+C3": {
+      "count": 32,
+      "film_pos": 10,
+      "film_neg": 22,
+      "film_rate": 0.312
+    },
+    "C1+C4": {
+      "count": 14,
+      "film_pos": 3,
+      "film_neg": 11,
+      "film_rate": 0.214
+    },
+    "C2+C1": {
+      "count": 84,
+      "film_pos": 36,
+      "film_neg": 48,
+      "film_rate": 0.429
+    },
+    "C2+C2": {
+      "count": 164,
+      "film_pos": 43,
+      "film_neg": 121,
+      "film_rate": 0.262
+    },
+    "C2+C3": {
+      "count": 137,
+      "film_pos": 46,
+      "film_neg": 91,
+      "film_rate": 0.336
+    },
+    "C2+C4": {
+      "count": 63,
+      "film_pos": 24,
+      "film_neg": 39,
+      "film_rate": 0.381
+    },
+    "C3+C1": {
+      "count": 65,
+      "film_pos": 25,
+      "film_neg": 40,
+      "film_rate": 0.385
+    },
+    "C3+C2": {
+      "count": 235,
+      "film_pos": 67,
+      "film_neg": 168,
+      "film_rate": 0.285
+    },
+    "C3+C3": {
+      "count": 85,
+      "film_pos": 20,
+      "film_neg": 65,
+      "film_rate": 0.235
+    },
+    "C3+C4": {
+      "count": 21,
+      "film_pos": 8,
+      "film_neg": 13,
+      "film_rate": 0.381
+    }
+  },
+  "monomer_topology_dist": {
+    "C3": 181,
+    "C2": 342,
+    "C1": 237,
+    "C4": 49
+  },
+  "centrality_top20": [
+    {
+      "smiles": "O=Cc1c(O)c(C=O)c(O)c(C=O)c1O",
+      "centrality": 0.1027,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "Nc1ccc(N)cc1",
+      "centrality": 0.1015,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "O=Cc1ccc(C=O)cc1",
+      "centrality": 0.0767,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1cc(C=O)cc(C=O)c1",
+      "centrality": 0.0656,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "Nc1ccc(-c2cc(-c3ccc(N)cc3)cc(-c3ccc(N)cc3)c2)cc1",
+      "centrality": 0.0569,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "Nc1ccc(-c2ccc(N)cc2)cc1",
+      "centrality": 0.0433,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "Nc1ccc(-c2nc(-c3ccc(N)cc3)nc(-c3ccc(N)cc3)n2)cc1",
+      "centrality": 0.0384,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "COc1cc(C=O)ccc1C=O",
+      "centrality": 0.0272,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "Nc1ccc(N(c2ccc(N)cc2)c2ccc(N)cc2)cc1",
+      "centrality": 0.026,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "O=Cc1ccc(-c2nc(-c3ccc(C=O)cc3)nc(-c3ccc(C=O)cc3)n2)cc1",
+      "centrality": 0.026,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "NN",
+      "centrality": 0.0223,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "Nc1ccc(C(c2ccc(N)cc2)(c2ccc(N)cc2)c2ccc(N)cc2)cc1",
+      "centrality": 0.021,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "O=Cc1cc(O)c(C=O)c(C=O)c1",
+      "centrality": 0.0186,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1ccc(-c2ccc(C=O)cc2)cc1",
+      "centrality": 0.0173,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1cc(O)cc(C=O)c1",
+      "centrality": 0.0161,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1cc(C=O)c(O)c(C=O)c1",
+      "centrality": 0.0149,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "Nc1ccc(-c2ccccc2)cc1",
+      "centrality": 0.0149,
+      "monomer_type": "amine"
+    },
+    {
+      "smiles": "O=Cc1cccc(C=O)c1",
+      "centrality": 0.0149,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1cc(O)c(C=O)cc1O",
+      "centrality": 0.0136,
+      "monomer_type": "aldehyde"
+    },
+    {
+      "smiles": "O=Cc1ccc(C=O)c(C=O)c1",
+      "centrality": 0.0136,
+      "monomer_type": "aldehyde"
+    }
+  ],
+  "communities": [
+    {
+      "community_id": 0,
+      "size": 2,
+      "types": {
+        "amine": 1,
+        "aldehyde": 1
+      },
+      "topology": {
+        "C2": 2
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "Cc1cc(C)cc(-c2c(C)cc(N)cc2N)c1",
+        "O=CC1=CC(O)=C(C=O)CC1=O"
+      ]
+    },
+    {
+      "community_id": 1,
+      "size": 2,
+      "types": {
+        "aldehyde": 1,
+        "amine": 1
+      },
+      "topology": {
+        "C3": 1,
+        "C2": 1
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "O=Cc1ccc(N(c2ccc(C=O)cc2)c2cccc(C=O)c2)cc1",
+        "NC(=S)C(N)=S"
+      ]
+    },
+    {
+      "community_id": 2,
+      "size": 4,
+      "types": {
+        "amine": 2,
+        "aldehyde": 2
+      },
+      "topology": {
+        "C3": 4
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "Cc1c(C)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c1C",
+        "COc1c(OC)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c1OC",
+        "Cc1c(C)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c1C",
+        "COc1c(OC)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c1OC"
+      ]
+    },
+    {
+      "community_id": 3,
+      "size": 2,
+      "types": {
+        "aldehyde": 1,
+        "amine": 1
+      },
+      "topology": {
+        "C1": 2
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "O=C=C1C(=O)C=C(O)C=C1C=O",
+        "NC1=CC(=O)c2ccccc2C1=O"
+      ]
+    },
+    {
+      "community_id": 4,
+      "size": 5,
+      "types": {
+        "amine": 1,
+        "aldehyde": 4
+      },
+      "topology": {
+        "C4": 1,
+        "C1": 4
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "NC(=O)c1c(N)cc(N)c(N)c1C(N)=O",
+        "O=Cc1ccc2c(ccc3ccccc32)c1Cl",
+        "O=Cc1ccc2c(ccc3ccccc32)c1",
+        "O=Cc1ccc2c(ccc3ccccc32)c1I",
+        "O=Cc1ccc2c(ccc3ccccc32)c1Br"
+      ]
+    },
+    {
+      "community_id": 5,
+      "size": 29,
+      "types": {
+        "aldehyde": 16,
+        "amine": 12,
+        "dual": 1
+      },
+      "topology": {
+        "C1": 14,
+        "C2": 10,
+        "C3": 4,
+        "C4": 1
+      },
+      "n_fluorine": 1,
+      "sample_members": [
+        "C=Cc1ccc(C=O)cc1C=C",
+        "N#Cc1cc(C#N)c(-c2ccccc2)c(-c2ccc(N)cc2)c1",
+        "O=Cc1ccccc1C(=O)O",
+        "O=Cc1ccc(C(=O)c2ccc(C=O)cc2)cc1",
+        "Nc1cnc2ccccc2n1",
+        "O=Cc1ccc(C(=C(c2ccc(C=O)cc2)c2ccc(C=O)cc2)c2ccc(C=O)cc2)cc1",
+        "Nc1ccc(-c2nc(-c3ccccc3)nc(-c3ccc(N)cc3)n2)cc1",
+        "Nc1ccc(C2=NC(c3ccccc3)(c3ccccc3)N2)cc1",
+        "Nc1ccc(-c2ccc(-c3ccc(N)cc3)c(-c3cccc(N)c3)c2)cc1",
+        "CCC(Oc1cc(C=O)ccc1C=O)S(=O)(=O)O"
+      ]
+    },
+    {
+      "community_id": 6,
+      "size": 2,
+      "types": {
+        "aldehyde": 1,
+        "amine": 1
+      },
+      "topology": {
+        "C3": 1,
+        "C2": 1
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "O=Cc1cc(C=O)cc(-c2cc(C=O)cc(C=O)c2)c1",
+        "Nc1ccnc(-c2cc(N)ccn2)c1"
+      ]
+    },
+    {
+      "community_id": 7,
+      "size": 74,
+      "types": {
+        "amine": 24,
+        "aldehyde": 49,
+        "dual": 1
+      },
+      "topology": {
+        "C3": 18,
+        "C2": 38,
+        "C1": 17,
+        "C4": 1
+      },
+      "n_fluorine": 4,
+      "sample_members": [
+        "N#Cc1ccc(Nc2ccc(-c3ccc(N)c(N)c3)cc2)c(N)c1",
+        "Cc1ccc(N)c(N)c1C",
+        "COc1cccc(-c2ccc(C=O)cc2C=O)c1-c1cc(C=O)cc(C=O)c1",
+        "Nc1cc(O)ccc1-c1cc(O)ccc1N",
+        "O=CC1=CC=C(C=O)CC1",
+        "O=Cc1ccc(C2=CC=CC3=CC3=CC=CC(c3ccccc3)=C2)cc1",
+        "O=Cc1ccc(CNBr)cc1",
+        "O=CC1=CC=C(N=Nc2ccc(C=O)cc2)CC1",
+        "Nc1cc(C=O)c(C=O)cc1O",
+        "O=Cc1ccc(N(c2ccccc2)c2ccccc2)cc1F"
+      ]
+    },
+    {
+      "community_id": 8,
+      "size": 2,
+      "types": {
+        "aldehyde": 1,
+        "amine": 1
+      },
+      "topology": {
+        "C1": 2
+      },
+      "n_fluorine": 1,
+      "sample_members": [
+        "O=Cc1ccc(=O)[nH]c(=O)c1",
+        "Nc1c(F)cc(-c2c(F)c(F)cc(F)c2F)c(F)c1F"
+      ]
+    },
+    {
+      "community_id": 9,
+      "size": 4,
+      "types": {
+        "amine": 2,
+        "aldehyde": 1,
+        "dual": 1
+      },
+      "topology": {
+        "C4": 1,
+        "C2": 3
+      },
+      "n_fluorine": 0,
+      "sample_members": [
+        "Nc1ccc(-c2nc(-c3ccc(N)cc3)c(-c3ccc(N)cc3)c(-c3ccc(N)cc3)n2)cc1",
+        "O=Cc1cccnc1C=O",
+        "Nc1ccc(C=O)c(-c2ccc(C=O)cc2)n1",
+        "Nc1ccc(-c2ccc(-c3cccc(-c4ccc(N)cc4)c3)cc2)cc1"
+      ]
+    }
+  ]
+}

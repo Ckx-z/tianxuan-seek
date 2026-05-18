@@ -1,0 +1,198 @@
+[
+  {
+    "community_id": 0,
+    "size": 2,
+    "types": {
+      "amine": 1,
+      "aldehyde": 1
+    },
+    "topology": {
+      "C2": 2
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "Cc1cc(C)cc(-c2c(C)cc(N)cc2N)c1",
+      "O=CC1=CC(O)=C(C=O)CC1=O"
+    ]
+  },
+  {
+    "community_id": 1,
+    "size": 2,
+    "types": {
+      "aldehyde": 1,
+      "amine": 1
+    },
+    "topology": {
+      "C3": 1,
+      "C2": 1
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "O=Cc1ccc(N(c2ccc(C=O)cc2)c2cccc(C=O)c2)cc1",
+      "NC(=S)C(N)=S"
+    ]
+  },
+  {
+    "community_id": 2,
+    "size": 4,
+    "types": {
+      "amine": 2,
+      "aldehyde": 2
+    },
+    "topology": {
+      "C3": 4
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "Cc1c(C)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c1C",
+      "COc1c(OC)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c(-c2ccc(N)cc2)c1OC",
+      "Cc1c(C)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c1C",
+      "COc1c(OC)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c(-c2ccc(C=O)cc2)c1OC"
+    ]
+  },
+  {
+    "community_id": 3,
+    "size": 2,
+    "types": {
+      "aldehyde": 1,
+      "amine": 1
+    },
+    "topology": {
+      "C1": 2
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "O=C=C1C(=O)C=C(O)C=C1C=O",
+      "NC1=CC(=O)c2ccccc2C1=O"
+    ]
+  },
+  {
+    "community_id": 4,
+    "size": 5,
+    "types": {
+      "amine": 1,
+      "aldehyde": 4
+    },
+    "topology": {
+      "C4": 1,
+      "C1": 4
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "NC(=O)c1c(N)cc(N)c(N)c1C(N)=O",
+      "O=Cc1ccc2c(ccc3ccccc32)c1Cl",
+      "O=Cc1ccc2c(ccc3ccccc32)c1",
+      "O=Cc1ccc2c(ccc3ccccc32)c1I",
+      "O=Cc1ccc2c(ccc3ccccc32)c1Br"
+    ]
+  },
+  {
+    "community_id": 5,
+    "size": 29,
+    "types": {
+      "aldehyde": 16,
+      "amine": 12,
+      "dual": 1
+    },
+    "topology": {
+      "C1": 14,
+      "C2": 10,
+      "C3": 4,
+      "C4": 1
+    },
+    "n_fluorine": 1,
+    "sample_members": [
+      "C=Cc1ccc(C=O)cc1C=C",
+      "N#Cc1cc(C#N)c(-c2ccccc2)c(-c2ccc(N)cc2)c1",
+      "O=Cc1ccccc1C(=O)O",
+      "O=Cc1ccc(C(=O)c2ccc(C=O)cc2)cc1",
+      "Nc1cnc2ccccc2n1",
+      "O=Cc1ccc(C(=C(c2ccc(C=O)cc2)c2ccc(C=O)cc2)c2ccc(C=O)cc2)cc1",
+      "Nc1ccc(-c2nc(-c3ccccc3)nc(-c3ccc(N)cc3)n2)cc1",
+      "Nc1ccc(C2=NC(c3ccccc3)(c3ccccc3)N2)cc1",
+      "Nc1ccc(-c2ccc(-c3ccc(N)cc3)c(-c3cccc(N)c3)c2)cc1",
+      "CCC(Oc1cc(C=O)ccc1C=O)S(=O)(=O)O"
+    ]
+  },
+  {
+    "community_id": 6,
+    "size": 2,
+    "types": {
+      "aldehyde": 1,
+      "amine": 1
+    },
+    "topology": {
+      "C3": 1,
+      "C2": 1
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "O=Cc1cc(C=O)cc(-c2cc(C=O)cc(C=O)c2)c1",
+      "Nc1ccnc(-c2cc(N)ccn2)c1"
+    ]
+  },
+  {
+    "community_id": 7,
+    "size": 74,
+    "types": {
+      "amine": 24,
+      "aldehyde": 49,
+      "dual": 1
+    },
+    "topology": {
+      "C3": 18,
+      "C2": 38,
+      "C1": 17,
+      "C4": 1
+    },
+    "n_fluorine": 4,
+    "sample_members": [
+      "N#Cc1ccc(Nc2ccc(-c3ccc(N)c(N)c3)cc2)c(N)c1",
+      "Cc1ccc(N)c(N)c1C",
+      "COc1cccc(-c2ccc(C=O)cc2C=O)c1-c1cc(C=O)cc(C=O)c1",
+      "Nc1cc(O)ccc1-c1cc(O)ccc1N",
+      "O=CC1=CC=C(C=O)CC1",
+      "O=Cc1ccc(C2=CC=CC3=CC3=CC=CC(c3ccccc3)=C2)cc1",
+      "O=Cc1ccc(CNBr)cc1",
+      "O=CC1=CC=C(N=Nc2ccc(C=O)cc2)CC1",
+      "Nc1cc(C=O)c(C=O)cc1O",
+      "O=Cc1ccc(N(c2ccccc2)c2ccccc2)cc1F"
+    ]
+  },
+  {
+    "community_id": 8,
+    "size": 2,
+    "types": {
+      "aldehyde": 1,
+      "amine": 1
+    },
+    "topology": {
+      "C1": 2
+    },
+    "n_fluorine": 1,
+    "sample_members": [
+      "O=Cc1ccc(=O)[nH]c(=O)c1",
+      "Nc1c(F)cc(-c2c(F)c(F)cc(F)c2F)c(F)c1F"
+    ]
+  },
+  {
+    "community_id": 9,
+    "size": 4,
+    "types": {
+      "amine": 2,
+      "aldehyde": 1,
+      "dual": 1
+    },
+    "topology": {
+      "C4": 1,
+      "C2": 3
+    },
+    "n_fluorine": 0,
+    "sample_members": [
+      "Nc1ccc(-c2nc(-c3ccc(N)cc3)c(-c3ccc(N)cc3)c(-c3ccc(N)cc3)n2)cc1",
+      "O=Cc1cccnc1C=O",
+      "Nc1ccc(C=O)c(-c2ccc(C=O)cc2)n1",
+      "Nc1ccc(-c2ccc(-c3cccc(-c4ccc(N)cc4)c3)cc2)cc1"
+    ]
+  }
+]
