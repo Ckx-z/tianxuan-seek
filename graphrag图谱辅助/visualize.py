@@ -343,10 +343,9 @@ html, body {{ height: 100%; margin: 0; padding: 0; overflow: hidden; }}
 <div id="search-panel">
     <div id="search-box">
         <input type="text" id="search-input"
-               placeholder="搜索: SMILES / film:top / f:yes / CAS / comm:yes ..." autofocus>
+               placeholder="搜索: SMILES / f:yes / CAS / comm:yes ..." autofocus>
         <div style="font-size:10px;color:#999;padding:4px 0 0 2px">
-          快捷: <b>film:top</b> (成膜率前3) | <b>film:best</b> (醛/胺各前3) | <b>f:yes</b> | <b>comm:yes</b> |
-          <b>type:醛</b> | <b>topo:C3</b>
+          快捷: <b>f:yes</b> | <b>comm:yes</b> | <b>type:aldehyde</b> | <b>topo:C3</b>
         </div>
     </div>
     <div id="search-results"><div class="no-results">输入关键词搜索单体</div></div>
@@ -394,7 +393,7 @@ function doSearch() {{
     }}
     var sortMode = 'lit', searchTerm = q;
     var specialCmds = {{
-        'film:top': 'film', 'film:best': 'film_best', 'film:0': 'film0',
+        'film:0': 'film0',
         'f:yes': 'f_yes', 'f:no': 'f_no', 'n:yes': 'n_yes',
         'comm:yes': 'comm', 'type:aldehyde': 'type_ald', 'type:amine': 'type_am',
         'topo:c1': 'topo_c1', 'topo:c2': 'topo_c2', 'topo:c3': 'topo_c3', 'topo:c4': 'topo_c4'
@@ -407,8 +406,6 @@ function doSearch() {{
     var results = [];
     for (var key in MONOMERS) {{
         var m = MONOMERS[key];
-        if (sortMode === 'film') {{ results.push(m); continue; }}
-        if (sortMode === 'film_best') {{ results.push(m); continue; }}
         if (sortMode === 'film0') {{ if (m.film_rate === 0) results.push(m); continue; }}
         if (sortMode === 'f_yes') {{ if (m.has_f) results.push(m); continue; }}
         if (sortMode === 'f_no') {{ if (!m.has_f) results.push(m); continue; }}
@@ -429,15 +426,10 @@ function doSearch() {{
         container.innerHTML = '<div class="no-results">无匹配结果</div>';
         resetHighlights(); return;
     }}
-    if (sortMode === 'film') {{ results.sort(function(a,b){{ return b.film_rate - a.film_rate; }}); }}
-    else if (sortMode === 'film_best') {{
-        var alds = results.filter(function(m){{ return m.mtype === 'aldehyde'; }}).sort(function(a,b){{ return b.film_rate - a.film_rate; }}).slice(0, 3);
-        var ams = results.filter(function(m){{ return m.mtype === 'amine'; }}).sort(function(a,b){{ return b.film_rate - a.film_rate; }}).slice(0, 3);
-        results = alds.concat(ams);
-    }} else {{ results.sort(function(a,b){{ return b.n_lit - a.n_lit; }}); }}
+    results.sort(function(a,b){{ return b.n_lit - a.n_lit; }});
 
     var html = '', matchSet = new Set();
-    var limit = sortMode === 'film' ? 3 : (sortMode === 'film_best' ? 6 : 80);
+    var limit = 80;
     for (var i = 0; i < Math.min(results.length, limit); i++) {{
         var m = results[i]; matchSet.add(m.full_smi);
         var cls = m.is_commercial ? ' commercial' : '';
@@ -761,10 +753,9 @@ def build_visualization(
     var options = {
       "nodes": {"borderWidth": 1, "borderWidthSelected": 3, "font": {"size": 9, "face": "Arial"}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 1.5},
-      "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.3,
-        "springLength": 400, "springConstant": 0.01, "damping": 0.6},
-        "maxVelocity": 30, "minVelocity": 1.5, "solver": "barnesHut",
-        "stabilization": {"iterations": 200, "fit": true}},
+      "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.2,
+        "springLength": 400, "springConstant": 0.01, "damping": 0.4},
+        "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 150, "navigationButtons": true,
 	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
@@ -832,9 +823,8 @@ def build_visualization(
       "nodes": {"borderWidth": 1.5, "borderWidthSelected": 4, "font": {"size": 11, "face": "Arial", "strokeWidth": 0}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 2, "selectionWidth": 2},
       "physics": {"barnesHut": {"gravitationalConstant": -3000, "centralGravity": 0.3,
-        "springLength": 300, "springConstant": 0.025, "damping": 0.5},
-        "maxVelocity": 25, "minVelocity": 1.5, "solver": "barnesHut",
-        "stabilization": {"iterations": 200, "fit": true}},
+        "springLength": 300, "springConstant": 0.025, "damping": 0.3},
+        "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 100, "navigationButtons": true, "keyboard": true,
 	       "hideEdgesOnDrag": true, "hideEdgesOnZoom": true}
     }
