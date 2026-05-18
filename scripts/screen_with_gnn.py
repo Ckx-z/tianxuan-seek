@@ -425,10 +425,10 @@ def load_monomer_universe(pool_path: str, meta_path: str,
                 # 多苯环非对位: 规则 2 已在前面验证, 此处仅记录
                 pass
 
-        # 规则 5: 炔丙基醚排除 (chem_penalty 未覆盖, 始终保留)
-        if _has_propargyl_ether(mol):
-            n_propargyl += 1
-            continue
+        # 规则 3: 炔丙基醚排除 (已关闭)
+        # if _has_propargyl_ether(mol):
+        #     n_propargyl += 1
+        #     continue
 
         # 规则 6: 取代基超限 → 限卤素 (C2>4, C3>5)
         if use_hard_rules and not _check_substituents(mol, topo, n_ald, n_am):
