@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.chemistry.monomer import _BUILTIN_MONOMERS
 
 # ── 常量 ──
-PREDICTED_EDGE_N = 5000       # 筛选结果 Top N
+PREDICTED_EDGE_N = 300        # 筛选结果 Top N
 SVG_SIZE_FULL = (200, 130)    # 全量图 SVG 尺寸 (小)
 SVG_SIZE_CORE = (260, 170)    # 核心图 SVG 尺寸
 
@@ -740,7 +740,7 @@ def build_visualization(
       "nodes": {"borderWidth": 1, "borderWidthSelected": 3, "font": {"size": 9, "face": "Arial"}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 1.5},
       "physics": {"barnesHut": {"gravitationalConstant": -2000, "centralGravity": 0.2,
-        "springLength": 250, "springConstant": 0.02, "damping": 0.4},
+        "springLength": 400, "springConstant": 0.01, "damping": 0.4},
         "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 150, "navigationButtons": true}
     }
@@ -810,7 +810,7 @@ def build_visualization(
       "nodes": {"borderWidth": 1.5, "borderWidthSelected": 4, "font": {"size": 11, "face": "Arial", "strokeWidth": 0}},
       "edges": {"smooth": {"type": "continuous", "forceDirection": "none"}, "hoverWidth": 2, "selectionWidth": 2},
       "physics": {"barnesHut": {"gravitationalConstant": -3000, "centralGravity": 0.3,
-        "springLength": 200, "springConstant": 0.04, "damping": 0.3},
+        "springLength": 300, "springConstant": 0.025, "damping": 0.3},
         "minVelocity": 0.75, "solver": "barnesHut", "stabilization": {"iterations": 200, "fit": true}},
       "interaction": {"hover": true, "tooltipDelay": 100, "navigationButtons": true, "keyboard": true}
     }
@@ -868,7 +868,7 @@ def _add_legend(html_path: str):
       <span style="color:#27ae60">—</span> 成膜率 ≥ 50%<br/>
       <span style="color:#f39c12">—</span> 成膜率 0–50%<br/>
       <span style="color:#bdc3c7">—</span> 成膜率 = 0<br/>
-      <span style="color:#e74c3c">- -</span> 预测配对 (Top 5000)<br/>
+      <span style="color:#e74c3c">- -</span> 预测配对 (Top 300)<br/>
       <hr style="margin:4px 0"/>
       <span>节点大小 ∝ 文献数 | 边宽 ∝ 配对文献数</span>
     </div>
