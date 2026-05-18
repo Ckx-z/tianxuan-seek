@@ -276,10 +276,10 @@ def extract_2d_monomers(llm_path: str) -> pd.DataFrame:
             n_excluded_para += 1
             continue
 
-        # 硬规则 5: 炔丙基醚排除
-        if _has_propargyl_ether(mol):
-            n_excluded_propargyl += 1
-            continue
+        # 硬规则 5: 炔丙基醚排除 (已关闭)
+        # if _has_propargyl_ether(mol):
+        #     n_excluded_propargyl += 1
+        #     continue
 
         # 硬规则 6: C2 取代基 >4 限卤素
         if not _check_c2_substituents(mol, topo, n_ald, n_am):
