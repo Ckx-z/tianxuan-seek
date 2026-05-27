@@ -36,7 +36,7 @@ class FilmHead(nn.Module):
                 e_pair: torch.Tensor) -> torch.Tensor:
         h = torch.cat([ea, eb, ea * eb, e_pair], dim=-1)
         h = self.norm(h)
-        return self.mlp(h).squeeze(-1)
+        return self.mlp(h).reshape(-1)
 
 
 class ConditionHead(nn.Module):
@@ -87,6 +87,8 @@ class ConditionHead(nn.Module):
     def forward(self, ea: torch.Tensor, eb: torch.Tensor
                 ) -> dict[str, torch.Tensor]:
         h = torch.cat([ea, eb], dim=-1)
+        if h.dim() == 1:
+            h = h.unsqueeze(0)  # 单样本加 batch 维
         return {
             name: self.classifiers[name](self.projections[name](h))
             for name in self.tasks

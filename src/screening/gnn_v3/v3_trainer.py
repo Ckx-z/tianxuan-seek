@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import average_precision_score
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
+from torch.utils.data import DataLoader
 
 from src.screening.gnn_v3.v3_loss import V3Loss
 from src.screening.gnn_v3.v3_scheduler import ChemWarmupScheduler
@@ -44,22 +44,32 @@ class V3Trainer:
         cl = self.chem_scheduler.get_lambda(epoch) if self.chem_scheduler else 0.0
 
         for batch in loader:
-            batch = batch.to(self.device)
-            ald_data = Data(x=batch.ald_x, edge_index=batch.ald_edge_index,
-                            edge_attr=batch.ald_edge_attr)
-            amine_data = Data(x=batch.amine_x, edge_index=batch.amine_edge_index,
-                              edge_attr=batch.amine_edge_attr)
+            ald_data = Data(
+                x=batch["ald_x"].to(self.device),
+                edge_index=batch["ald_edge_index"].to(self.device),
+                edge_attr=batch["ald_edge_attr"].to(self.device),
+            )
+            amine_data = Data(
+                x=batch["amine_x"].to(self.device),
+                edge_index=batch["amine_edge_index"].to(self.device),
+                edge_attr=batch["amine_edge_attr"].to(self.device),
+            )
+            film_label = batch["film_label"].to(self.device)
+            quality_weight = batch["quality_weight"].to(self.device)
+            cond_labels = {k: v.to(self.device) for k, v in batch["cond_labels"].items()}
+            cond_masks = {k: v.to(self.device) for k, v in batch["cond_masks"].items()}
+            chem_violation = batch["chem_violation"].to(self.device)
 
             self.optimizer.zero_grad()
             result = self.model(ald_data, amine_data, return_attn=True)
             film_logits, cond_logits, (ald_attn, amine_attn) = result
 
             loss, comps = self.loss_fn(
-                film_logits, batch.film_label,
-                cond_logits, batch.cond_labels, batch.cond_masks,
-                quality_weights=batch.quality_weight,
+                film_logits, film_label,
+                cond_logits, cond_labels, cond_masks,
+                quality_weights=quality_weight,
                 ald_attn=ald_attn, amine_attn=amine_attn,
-                chem_penalty=batch.chem_violation if hasattr(batch, "chem_violation") else None,
+                chem_penalty=chem_violation,
                 chem_lambda=cl,
             )
 
@@ -85,17 +95,27 @@ class V3Trainer:
         cl = self.chem_scheduler.get_lambda(epoch) if self.chem_scheduler else 0.0
 
         for batch in loader:
-            batch = batch.to(self.device)
-            ald_data = Data(x=batch.ald_x, edge_index=batch.ald_edge_index,
-                            edge_attr=batch.ald_edge_attr)
-            amine_data = Data(x=batch.amine_x, edge_index=batch.amine_edge_index,
-                              edge_attr=batch.amine_edge_attr)
+            ald_data = Data(
+                x=batch["ald_x"].to(self.device),
+                edge_index=batch["ald_edge_index"].to(self.device),
+                edge_attr=batch["ald_edge_attr"].to(self.device),
+            )
+            amine_data = Data(
+                x=batch["amine_x"].to(self.device),
+                edge_index=batch["amine_edge_index"].to(self.device),
+                edge_attr=batch["amine_edge_attr"].to(self.device),
+            )
+            film_label = batch["film_label"].to(self.device)
+            quality_weight = batch["quality_weight"].to(self.device)
+            cond_labels = {k: v.to(self.device) for k, v in batch["cond_labels"].items()}
+            cond_masks = {k: v.to(self.device) for k, v in batch["cond_masks"].items()}
+            chem_violation = batch["chem_violation"].to(self.device)
 
             film_logits, cond_logits = self.model(ald_data, amine_data)
             probs = torch.sigmoid(film_logits)
 
             all_probs.extend(probs.cpu().tolist())
-            all_labels.extend(batch.film_label.cpu().tolist())
+            all_labels.extend(batch["film_label"].cpu().tolist())
 
         return {"pr_auc": average_precision_score(all_labels, all_probs)}
 

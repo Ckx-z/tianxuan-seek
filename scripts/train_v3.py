@@ -16,7 +16,7 @@ import torch
 import yaml
 from rdkit import RDLogger
 from sklearn.model_selection import StratifiedKFold
-from torch_geometric.loader import DataLoader
+from torch.utils.data import DataLoader
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
