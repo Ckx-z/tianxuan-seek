@@ -47,9 +47,15 @@ def condition_losses(cond_logits: dict[str, torch.Tensor],
 
 
 def symmetry_loss(ald_attn: torch.Tensor, amine_attn: torch.Tensor) -> torch.Tensor:
-    ald_avg = ald_attn.mean(dim=0)
-    amine_avg = amine_attn.mean(dim=0)
-    diff = ald_avg - amine_avg.t()
+    # ald_attn: [B, heads, N_ald, N_amine] or [heads, N_ald, N_amine]
+    if ald_attn.dim() == 4:
+        ald_avg = ald_attn.mean(dim=1)      # [B, N_ald, N_amine]
+        amine_avg = amine_attn.mean(dim=1)  # [B, N_amine, N_ald]
+        diff = ald_avg - amine_avg.transpose(-2, -1)
+    else:
+        ald_avg = ald_attn.mean(dim=0)      # [N_ald, N_amine]
+        amine_avg = amine_attn.mean(dim=0)  # [N_amine, N_ald]
+        diff = ald_avg - amine_avg.t()
     return (diff ** 2).mean()
 
 

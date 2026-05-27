@@ -37,7 +37,7 @@ class CrossGraphAttention(nn.Module):
         self.norm_amine = nn.LayerNorm(hidden_dim)
 
     def _cross_attend(self, query: torch.Tensor, key: torch.Tensor,
-                      value: torch.Tensor) -> torch.Tensor:
+                      value: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         N_q, N_k = query.shape[0], key.shape[0]
 
         q = self.q_proj(query).view(N_q, self.num_heads, self.head_dim).transpose(0, 1)
@@ -51,14 +51,18 @@ class CrossGraphAttention(nn.Module):
         out = torch.matmul(attn, v)
         out = out.transpose(0, 1).reshape(N_q, self.hidden_dim)
         out = self.out_proj(out)
-        return out
+        return out, attn
 
-    def forward(self, ald_emb: torch.Tensor, amine_emb: torch.Tensor
-                ) -> tuple[torch.Tensor, torch.Tensor]:
-        ald_attended = self._cross_attend(ald_emb, amine_emb, amine_emb)
+    def forward(self, ald_emb: torch.Tensor, amine_emb: torch.Tensor,
+                return_attn: bool = False
+                ) -> tuple[torch.Tensor, torch.Tensor] | \
+                   tuple[torch.Tensor, torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        ald_attended, ald_attn = self._cross_attend(ald_emb, amine_emb, amine_emb)
         ald_out = self.norm_ald(ald_emb + self.dropout(ald_attended))
 
-        amine_attended = self._cross_attend(amine_emb, ald_emb, ald_emb)
+        amine_attended, amine_attn = self._cross_attend(amine_emb, ald_emb, ald_emb)
         amine_out = self.norm_amine(amine_emb + self.dropout(amine_attended))
 
+        if return_attn:
+            return ald_out, amine_out, (ald_attn, amine_attn)
         return ald_out, amine_out

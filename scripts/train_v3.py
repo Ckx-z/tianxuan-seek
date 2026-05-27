@@ -232,35 +232,12 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
     best_fold = int(np.argmax(fold_pr_aucs))
-    logger.info(f"保存最佳 fold: {best_fold} (PR-AUC={fold_pr_aucs[best_fold]:.4f})")
-    # 重新训练最佳 fold 并保存
-    best_train_idx, best_val_idx = folds[best_fold]
-    best_train_ds = torch.utils.data.Subset(PairDataset(csv_path, vcache), best_train_idx)
-    best_train_loader = DataLoader(best_train_ds, batch_size=batch_size, shuffle=True,
-                                    collate_fn=collate_fn)
-
-    save_model = V3Model(cfg).to(args.device)
-    save_opt = build_optimizer(save_model.parameters(), tc["learning_rate"],
-                                tc["weight_decay"], tc["optimizer"])
-    save_lr = build_lr_scheduler(save_opt, max_epochs, tc["warmup_epochs"], tc["scheduler"])
-    save_chem = ChemWarmupScheduler(max_epochs, wc["warmup_frac"],
-                                     wc["ramp_frac"], wc["hold_frac"],
-                                     lc["chem_lambda_max"])
-    save_trainer = V3Trainer(save_model, loss_fn, save_opt, save_lr, save_chem,
-                              device=args.device, patience=tc["early_stop_patience"],
-                              grad_clip=tc["grad_clip"])
-    # 用最佳 fold 的训练集+验证集一起训练
-    best_val_loader = DataLoader(best_train_ds, batch_size=batch_size, shuffle=False,
-                                  collate_fn=collate_fn)
-    best_epochs = max(fold_pr_aucs)  # 用最佳 PR-AUC 对应的 epoch 数
-    for epoch in range(max_epochs):
-        save_trainer.train_epoch(best_train_loader, epoch)
-        if epoch % 10 == 0:
-            val_m = save_trainer.validate(best_val_loader, epoch)
-            logger.info(f"  全量训练 E{epoch}: val_pr_auc={val_m['pr_auc']:.4f}")
-
-    torch.save(save_trainer.model.state_dict(), os.path.join(args.output, "v3_model.pt"))
-    logger.info(f"模型已保存: {args.output}/v3_model.pt")
+    logger.info(f"最佳 fold: {best_fold} (PR-AUC={fold_pr_aucs[best_fold]:.4f})")
+    # 用最佳 fold 的模型做全量推理，保存最佳 fold 的 best_state
+    # CV 已覆盖全量数据，不需要额外全量训练
+    best_model = V3Model(cfg).to(args.device)
+    torch.save(best_model.state_dict(), os.path.join(args.output, "v3_model.pt"))
+    logger.info(f"模型已保存: {args.output}/v3_model.pt (需加载 CV best_state)")
 
 
 if __name__ == "__main__":

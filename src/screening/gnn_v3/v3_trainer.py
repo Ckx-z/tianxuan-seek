@@ -51,12 +51,14 @@ class V3Trainer:
                               edge_attr=batch.amine_edge_attr)
 
             self.optimizer.zero_grad()
-            film_logits, cond_logits = self.model(ald_data, amine_data)
+            result = self.model(ald_data, amine_data, return_attn=True)
+            film_logits, cond_logits, (ald_attn, amine_attn) = result
 
             loss, comps = self.loss_fn(
                 film_logits, batch.film_label,
                 cond_logits, batch.cond_labels, batch.cond_masks,
                 quality_weights=batch.quality_weight,
+                ald_attn=ald_attn, amine_attn=amine_attn,
                 chem_penalty=batch.chem_violation if hasattr(batch, "chem_violation") else None,
                 chem_lambda=cl,
             )

@@ -1,12 +1,12 @@
-r"""化学惩罚项 — 8 条连续可微规则，将化学先验注入训练。
+r"""化学惩罚项 — 3 条化学硬事实规则，将化学先验注入训练。
 
-4 条单体级 + 4 条配对级（从 Phase 6 配对策略提前）。
-已删除 rings（芳香复杂度）：90% 样本违反，无区分度，且与 phenyl 重复。
+仅保留几乎无例外的化学硬事实: 苯环必需 / 官能团对称 / C2 对位。
+其余规则（取代基、溶解性、刚性、共轭、位阻）交给 GNN 自己学。
 
 设计原则:
   1. 每条规则定义连续化「违反度」v in [0, 1]
   2. 只罚假阳性: penalty = violation * prob（通过 prob 回传梯度）
-  3. lambda_monomer=0.005, lambda_pair=0.003
+  3. lambda_chem=0.005
   4. Warm-up: 前 50% epochs lambda=0, 50%-80% 线性增加, 最后 20% 恒定
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Dict, List
 import numpy as np
 import torch
 from rdkit import Chem
-from rdkit.Chem import Descriptors, CanonicalRankAtoms, Crippen
+from rdkit.Chem import Descriptors, CanonicalRankAtoms
 
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
 _AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")
@@ -24,10 +24,7 @@ _BENZENE_SMARTS = Chem.MolFromSmarts("c1ccccc1")
 _HALOGENS = {9, 17, 35, 53}
 
 DEFAULT_WEIGHTS = {
-    # 单体级 (4 条)
-    "phenyl": 0.5, "symmetry": 0.5, "para": 0.4, "substituent": 0.3,
-    # 配对级 (4 条)
-    "solubility": 0.3, "rigidity": 0.3, "conjugation": 0.3, "steric": 0.3,
+    "phenyl": 0.5, "symmetry": 0.5, "para": 0.4,
 }
 
 
@@ -41,19 +38,7 @@ def _topology(n_ald: int, n_am: int) -> str:
     return "C1"
 
 
-def _count_steric_neighbors(mol: Chem.Mol, smarts: Chem.Mol, radius: int = 2) -> int:
-    matches = mol.GetSubstructMatches(smarts)
-    if not matches:
-        return 0
-    total = 0
-    for match in matches:
-        env = Chem.FindAtomEnvironmentOfRadiusN(mol, radius, match[0])
-        if env is not None:
-            total += len(set(env))
-    return total
-
-
-# ── 单体级 (4 条) ────────────────────────────────────────
+# ── 单体级 (3 条) ────────────────────────────────────────
 
 def _violation_phenyl(mol: Chem.Mol) -> float:
     n = len(mol.GetSubstructMatches(_BENZENE_SMARTS))
@@ -115,57 +100,6 @@ def _violation_para(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> float:
     return 0.0
 
 
-def _violation_substituent(mol: Chem.Mol) -> float:
-    rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
-    max_excess = 0
-    for ring in rings:
-        ring_set = set(ring)
-        n_sub, n_nonhalo = 0, 0
-        for aidx in ring:
-            atom = mol.GetAtomWithIdx(aidx)
-            for nbr in atom.GetNeighbors():
-                if nbr.GetIdx() not in ring_set:
-                    n_sub += 1
-                    an = nbr.GetAtomicNum()
-                    if an not in _HALOGENS and an != 1:
-                        n_nonhalo += 1
-        if n_sub > 4:
-            max_excess = max(max_excess, n_nonhalo)
-    return min(1.0, max_excess / 4.0)
-
-
-# ── 配对级 (4 条) ────────────────────────────────────────
-
-def _violation_solubility(ald: Chem.Mol, amine: Chem.Mol) -> float:
-    try:
-        logp_ald = Crippen.MolLogP(ald)
-        logp_amine = Crippen.MolLogP(amine)
-    except Exception:
-        return 0.0
-    return max(0.0, abs(logp_ald - logp_amine) - 4.0) / 4.0
-
-
-def _violation_rigidity(ald: Chem.Mol, amine: Chem.Mol) -> float:
-    n_rot_ald = Descriptors.NumRotatableBonds(ald)
-    n_rot_amine = Descriptors.NumRotatableBonds(amine)
-    return max(0.0, n_rot_ald - 2) * max(0.0, n_rot_amine - 2) / 16.0
-
-
-def _violation_conjugation(ald: Chem.Mol, amine: Chem.Mol) -> float:
-    ald_arom = sum(1 for a in ald.GetAtoms() if a.GetIsAromatic()) > 0
-    amine_arom = sum(1 for a in amine.GetAtoms() if a.GetIsAromatic()) > 0
-    return 1.0 if (ald_arom != amine_arom) else 0.0
-
-
-def _violation_steric(ald: Chem.Mol, amine: Chem.Mol) -> float:
-    s_ald = _count_steric_neighbors(ald, _ALD_SMARTS)
-    s_amine = _count_steric_neighbors(amine, _AM_SMARTS)
-    total_atoms = ald.GetNumAtoms() + amine.GetNumAtoms()
-    if total_atoms == 0:
-        return 0.0
-    return max(0.0, (s_ald + s_amine) / total_atoms - 0.5) / 0.5
-
-
 # ── 主接口 ────────────────────────────────────────────────
 
 def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
@@ -192,11 +126,6 @@ def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
             _violation_para(ald, n_ald, n_am_ald, ald_topo),
             _violation_para(am, n_ald_am, n_am, am_topo),
         ),
-        "substituent": max(_violation_substituent(ald), _violation_substituent(am)),
-        "solubility": _violation_solubility(ald, am),
-        "rigidity": _violation_rigidity(ald, am),
-        "conjugation": _violation_conjugation(ald, am),
-        "steric": _violation_steric(ald, am),
     }
 
 

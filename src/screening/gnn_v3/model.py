@@ -62,13 +62,22 @@ class V3Model(nn.Module):
             dropout=cond_cfg.get("dropout", 0.1),
         )
 
-    def forward(self, ald_data: Data, amine_data: Data
-                ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    def forward(self, ald_data: Data, amine_data: Data,
+                return_attn: bool = False
+                ) -> tuple[torch.Tensor, dict[str, torch.Tensor]] | \
+                   tuple[torch.Tensor, dict[str, torch.Tensor],
+                         tuple[torch.Tensor, torch.Tensor]]:
         ald_emb, amine_emb = self.encoder(ald_data, amine_data)
-        ald_emb, amine_emb = self.attention(ald_emb, amine_emb)
+        attn_result = self.attention(ald_emb, amine_emb, return_attn=return_attn)
+        if return_attn:
+            ald_emb, amine_emb, attn_weights = attn_result
+        else:
+            ald_emb, amine_emb = attn_result
         ea, eb, e_pair = self.pooling(ald_emb, amine_emb)
         film_logit = self.film_head(ea, eb, e_pair)
         cond_logits = self.condition_head(ea, eb)
+        if return_attn:
+            return film_logit, cond_logits, attn_weights
         return film_logit, cond_logits
 
     def predict(self, ald_data: Data, amine_data: Data) -> torch.Tensor:
