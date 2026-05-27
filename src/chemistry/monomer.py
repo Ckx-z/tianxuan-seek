@@ -438,36 +438,43 @@ def _expand_name_candidates(raw: str) -> List[str]:
     """从混合格式 'English（缩写，中文）' 提取候选名列表。
 
     策略：按优先级排列
-    1. 英文全名（括号前的主文本）
+    1. 英文全名（去除末尾括号标注后的主文本）
     2. 括号内的英文缩写（2-6 个大写字母）
     3. 中文名（全角括号内）
     4. 原始文本本身
+
+    注意：IUPAC 名称内部含括号（如 tetrakis(4-formylphenyl)methane），
+    不能简单在第一个 '(' 处截断。只去除末尾空格后紧跟的括号标注。
     """
     candidates = []
     raw = raw.strip()
     candidates.append(raw)  # 完整文本作为兜底
 
-    # 提取括号前主文本
-    m = re.match(r'^([^(（]+)', raw)
-    if m:
-        main = m.group(1).strip()
+    # 提取末尾括号标注（空格 + 括号 + 缩写/中文）
+    # 匹配末尾的 " (XXX)" 或 "（XXX）" 格式，其中 XXX 是缩写或中文
+    tail_paren = re.search(r'\s+[（(]([^）)]+)[）)]?\s*$', raw)
+    if tail_paren:
+        main = raw[:tail_paren.start()].strip()
         if main and main != raw:
             candidates.insert(0, main)
 
-    # 提取括号内内容
-    paren_content = re.findall(r'[（(]([^）)]*)[）)]', raw)
-    for pc in paren_content:
-        pc = pc.strip()
-        if not pc:
-            continue
-        # 提取英文缩写（2-6个大写字母）
-        abbrs = re.findall(r'\b([A-Z]{2,6})\b', pc)
+        # 提取括号内缩写
+        pc = tail_paren.group(1).strip()
+        abbrs = re.findall(r'\b([A-Z][A-Za-z0-9]{1,7})\b', pc)
         for ab in abbrs:
             if ab not in candidates:
                 candidates.insert(1, ab)
-        # 中文名也加入候选
         if re.search(r'[一-鿿]', pc):
             candidates.append(pc)
+    else:
+        # 没有末尾括号标注时，尝试提取全角括号内的中文
+        paren_content = re.findall(r'[（(]([^）)]*)[）)]', raw)
+        for pc in paren_content:
+            pc = pc.strip()
+            if not pc:
+                continue
+            if re.search(r'[一-鿿]', pc):
+                candidates.append(pc)
 
     # 去重保序
     seen = set()
@@ -477,6 +484,118 @@ def _expand_name_candidates(raw: str) -> List[str]:
             seen.add(c)
             result.append(c)
     return result
+
+
+# ── v3 单体过滤扩展 ──────────────────────────────────────────────
+
+# SMILES 中视为「有机」的元素（原子序数），不在白名单内的金属/半金属视为污染物
+_ORGANIC_ATOMIC_NUMBERS = {1, 5, 6, 7, 8, 9, 14, 15, 16, 17, 34, 35, 52, 53}
+
+# 单体名称中提示含金属的关键词（骨架/配体类）
+_METAL_SKELETON_KEYWORDS = [
+    "porphyrin", "卟啉", "phthalocyanine", "酞菁", "salen", "salophen",
+    "TAPP", "Pc", "corrole", "咔咯", "MOF", "金属有机框架",
+    "配合物", "络合物", "complex", "metalloligand", "金属配体",
+    "bpy", "bipyridine", "phenanthroline", "菲咯啉", "terpyridine",
+    "三联吡啶", "crown ether", "冠醚",
+]
+
+# 单体名称中的金属元素关键词（需词边界匹配，避免 diamine 误匹配 In）
+_METAL_ELEMENT_PATTERN = re.compile(
+    r'\b(Fe|Co|Ni|Cu|Zn|Mn|Ru|Rh|Pd|Pt|Ir|Os|Re|Cr|Mo|W|V|Ti|Zr|Hf|'
+    r'Ag|Au|Cd|Hg|Al|Ga|In|Sn|Pb|Sb|Bi|Mg|Ca|Sr|Ba|'
+    r'La|Ce|Eu|Tb)\b',
+    re.IGNORECASE,
+)
+
+
+def has_metal_smiles(smiles: Optional[str]) -> bool:
+    """从 SMILES 检测是否含金属/半金属原子。
+
+    RDKit 解析后遍历所有原子，检查原子序数 > 18 且不在有机白名单中。
+    同时检查 SMILES 字符串中的 [Metal] 标记（RDKit 可能无法解析某些金属配合物）。
+    """
+    if not smiles or not smiles.strip():
+        return False
+    s = smiles.strip()
+
+    # 字符串级预检：[X] 方括号标记的非有机原子
+    bracket_atoms = re.findall(r'\[([A-Z][a-z]?)', s)
+    for atom in bracket_atoms:
+        if atom not in {"C", "N", "O", "F", "P", "S", "Cl", "Br", "I",
+                        "Si", "Se", "Te", "B", "H", "He", "Li", "Be",
+                        "Ne", "Ar", "Kr", "Xe", "Rn"}:
+            return True
+
+    # RDKit 原子序数检测
+    mol = Chem.MolFromSmiles(s)
+    if mol is None:
+        return False
+    for atom in mol.GetAtoms():
+        atomic_num = atom.GetAtomicNum()
+        if atomic_num > 18 and atomic_num not in _ORGANIC_ATOMIC_NUMBERS:
+            return True
+    return False
+
+
+def has_metal_name(name: Optional[str]) -> bool:
+    """从单体名称检测是否含金属相关关键词。
+
+    覆盖 porphyrin/phthalocyanine/salen/TAPP/corrode 等常见金属配体骨架，
+    以及配合物/络合物/MOF 等金属有机体系。
+    金属元素符号使用词边界匹配，避免 diamine→In 误匹配。
+    """
+    if not name or not name.strip():
+        return False
+    text = name.strip()
+
+    # 骨架/配体关键词
+    for kw in _METAL_SKELETON_KEYWORDS:
+        if kw.lower() in text.lower():
+            return True
+
+    # 金属元素符号（词边界）
+    if _METAL_ELEMENT_PATTERN.search(text):
+        return True
+
+    return False
+
+
+def is_imine_only(chemistry_type: Optional[str]) -> bool:
+    """检查 chemistry_type 是否为纯亚胺体系。
+
+    排除：hydrazone/imide/boronate/olefin/triazine/phenazine/azine/
+          squaraine/carbamate/urea/amide/mixed/hybrid/post-modification 等。
+    """
+    if not chemistry_type or not chemistry_type.strip():
+        return False
+    ct = chemistry_type.lower().strip()
+
+    # 先检查黑名单（排除包含 imine 但实际是混合体系的情况）
+    non_imine = [
+        "hydrazone", "imide", "boronate", "boroxine", "boronic ester",
+        "olefin", "vinylene", "triazine", "phenazine", "azine",
+        "squaraine", "carbamate", "urea", "amide", "ester",
+        "keto", "ketone", "ether", "thioether",
+        "mixed", "hybrid", "dual", "hetero", "heterogeneous",
+        "post-modification", "post-synthetic", "后修饰", "psm",
+        "metal", "coordination", "配位",
+        "not cof", "non-cof", "非cof",
+        "thiazole", "oxazole", "reduced", "reduction",
+        "polymer", "dynamic", "transformation", "conversion",
+        "keto-enamine",
+    ]
+    for kw in non_imine:
+        if kw in ct:
+            return False
+
+    # 白名单：明确为 imine/Schiff-base
+    imine_whitelist = ["imine", "schiff base", "schiff-base", "亚胺", "席夫碱"]
+    for w in imine_whitelist:
+        if w in ct:
+            return True
+
+    return False
 
 
 def normalize_fluorine_monomer_field(text: str) -> Optional[bool]:

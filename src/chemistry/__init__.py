@@ -1,5 +1,8 @@
 # 化学信息处理模块
-from src.chemistry.monomer import MonomerLibrary, extract_monomer_names, normalize_fluorine_monomer_field
+from src.chemistry.monomer import (
+    MonomerLibrary, extract_monomer_names, normalize_fluorine_monomer_field,
+    has_metal_smiles, has_metal_name, is_imine_only,
+)
 from src.chemistry.imine_check import ImineChecker, classify_monomer
 from src.chemistry.fluorination import FluorineDetector, virtual_fluorination
 from src.chemistry.linker_analyzer import (
@@ -13,6 +16,9 @@ __all__ = [
     "MonomerLibrary",
     "extract_monomer_names",
     "normalize_fluorine_monomer_field",
+    "has_metal_smiles",
+    "has_metal_name",
+    "is_imine_only",
     "ImineChecker",
     "classify_monomer",
     "FluorineDetector",
