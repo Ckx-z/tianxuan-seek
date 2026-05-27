@@ -1,0 +1,73 @@
+# v3 GNN 模型配置文件 — 所有模块的超参数统一管理
+
+featurizer:
+  atom_dim: 37
+  edge_dim: 5
+
+encoder:
+  in_dim: 37
+  hidden_dim: 256
+  num_layers: 5
+  dropout: 0.1
+  jk_pooling: mean
+
+attention:
+  hidden_dim: 256
+  num_heads: 4
+  dropout: 0.1
+  use_3d_bias: false
+
+pooling:
+  hidden_dim: 256
+  pool_dim: 256
+
+heads:
+  hidden_dim: 256
+  film_head:
+    hidden_dims: [512, 256, 128]
+    dropout: 0.2
+  condition_head:
+    hidden_dim: 128
+    dropout: 0.1
+    tasks:
+      synthesis_route: 5
+      interface_type: 3
+      catalyst: 5
+      solvent: 7
+      temperature: 5
+
+loss:
+  focal_alpha: 0.75
+  focal_gamma: 2.0
+  cond_lambda: 0.1
+  chem_lambda_max: 0.005  # 第一次训练后根据 L_chem 量级调整，可能降至 0.001
+  sym_lambda: 0.01
+  use_film_quality_weight: true
+
+chem_warmup:
+  warmup_frac: 0.5
+  ramp_frac: 0.3
+  hold_frac: 0.2
+
+training:
+  batch_size: 32
+  max_epochs: 200
+  early_stop_patience: 30
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: adamw
+  scheduler: cosine
+  warmup_epochs: 5
+  grad_clip: 1.0
+
+evaluation:
+  cv_folds: 5
+  cv_repeats: 3
+  group_kfold: true
+  benchmark_path: data/processed/benchmark_pairs.csv
+
+data:
+  train_csv: data/processed/v3_train.csv
+  smiles_source_weights:
+    builtin: 1.0
+    sanitize_fallback: 0.9
