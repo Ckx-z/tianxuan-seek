@@ -1,34 +1,37 @@
-r"""化学惩罚项 — 将筛选硬规则连续化为可微损失，注入训练。
+r"""化学惩罚项 — 8 条连续可微规则，将化学先验注入训练。
+
+4 条单体级 + 4 条配对级（从 Phase 6 配对策略提前）。
+已删除 rings（芳香复杂度）：90% 样本违反，无区分度，且与 phenyl 重复。
 
 设计原则:
-  1. 每条规则定义连续化「违反度」v ∈ [0, 1]
-  2. 仅惩罚预测为正 (pred > 0.5) 的样本 — 语义是「不能对违规自信判正」
-  3. 惩罚强度由规则化学重要性加权: w_sym > w_para > w_rings > w_substituent
-
-L_total = L_focal + \lambda \cdot \sum_i w_i \cdot v_i \cdot \mathbb{1}[pred > 0.5]
+  1. 每条规则定义连续化「违反度」v in [0, 1]
+  2. 只罚假阳性: penalty = violation * prob（通过 prob 回传梯度）
+  3. lambda_monomer=0.005, lambda_pair=0.003
+  4. Warm-up: 前 50% epochs lambda=0, 50%-80% 线性增加, 最后 20% 恒定
 """
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
 from rdkit import Chem
-from rdkit.Chem import Descriptors, CanonicalRankAtoms
+from rdkit.Chem import Descriptors, CanonicalRankAtoms, Crippen
 
 _ALD_SMARTS = Chem.MolFromSmarts("[CX3H1](=O)[#6]")
 _AM_SMARTS = Chem.MolFromSmarts("[NH2][c]")
 _BENZENE_SMARTS = Chem.MolFromSmarts("c1ccccc1")
 _HALOGENS = {9, 17, 35, 53}
 
-# ── 规则权重 (化学重要性排序) ──
 DEFAULT_WEIGHTS = {
-    "symmetry": 0.5,       # 对称性是最重要的 2D 约束
-    "para": 0.4,            # C2 对位是几何硬要求
-    "rings": 0.3,           # 芳环过多 → 空间位阻
-    "substituent": 0.3,     # 取代基过多 (>4 非卤素) → 位阻+电子干扰
+    # 单体级 (4 条)
+    "phenyl": 0.5, "symmetry": 0.5, "para": 0.4, "substituent": 0.3,
+    # 配对级 (4 条)
+    "solubility": 0.3, "rigidity": 0.3, "conjugation": 0.3, "steric": 0.3,
 }
 
+
+# ── 辅助 ──────────────────────────────────────────────────
 
 def _topology(n_ald: int, n_am: int) -> str:
     if n_ald >= 3 or n_am >= 3:
@@ -38,8 +41,26 @@ def _topology(n_ald: int, n_am: int) -> str:
     return "C1"
 
 
+def _count_steric_neighbors(mol: Chem.Mol, smarts: Chem.Mol, radius: int = 2) -> int:
+    matches = mol.GetSubstructMatches(smarts)
+    if not matches:
+        return 0
+    total = 0
+    for match in matches:
+        env = Chem.FindAtomEnvironmentOfRadiusN(mol, radius, match[0])
+        if env is not None:
+            total += len(set(env))
+    return total
+
+
+# ── 单体级 (4 条) ────────────────────────────────────────
+
+def _violation_phenyl(mol: Chem.Mol) -> float:
+    n = len(mol.GetSubstructMatches(_BENZENE_SMARTS))
+    return 1.0 - min(n, 1.0)
+
+
 def _violation_symmetry(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> float:
-    """不对称违反度: 不对称 C2/C3 → 1.0, 对称 → 0.0"""
     if topo not in ("C2", "C3"):
         return 0.0
     if n_ald >= 2:
@@ -49,7 +70,7 @@ def _violation_symmetry(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> floa
         matches = mol.GetSubstructMatches(_AM_SMARTS)
         reactive = [m[0] for m in matches]
     else:
-        return 1.0  # <2 反应位点，严重违规
+        return 1.0
     if len(reactive) < 2:
         return 1.0
     ranks = CanonicalRankAtoms(mol, breakTies=False)
@@ -60,7 +81,6 @@ def _violation_symmetry(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> floa
 
 
 def _violation_para(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> float:
-    """C2 非对位违反度: 同环间位/邻位 → 1.0, 对位 → 0.0"""
     if topo != "C2":
         return 0.0
     if n_ald >= 2:
@@ -73,7 +93,6 @@ def _violation_para(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> float:
         return 1.0
     if len(reactive_atoms) < 2:
         return 1.0
-
     rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
     for ring in rings:
         ring_set = set(ring)
@@ -89,23 +108,14 @@ def _violation_para(mol: Chem.Mol, n_ald: int, n_am: int, topo: str) -> float:
                 )
                 if ring_bonds == 3:
                     return 0.0
-                elif ring_bonds == 2:   # 间位
+                elif ring_bonds == 2:
                     return 0.8
-                elif ring_bonds == 1:   # 邻位
+                elif ring_bonds == 1:
                     return 1.0
-    return 0.0  # 不在同环 → 通过
-
-
-def _violation_rings(mol: Chem.Mol) -> float:
-    """芳环过多违反度: 连续化, >4 环部分归一化到 [0, 1]"""
-    n = Descriptors.NumAromaticRings(mol)
-    if n <= 4:
-        return 0.0
-    return min(1.0, (n - 4) / 6.0)
+    return 0.0
 
 
 def _violation_substituent(mol: Chem.Mol) -> float:
-    """非卤素过取代替反度: 每多 1 个非卤素取代 +0.25, 上限 1.0"""
     rings = mol.GetSubstructMatches(_BENZENE_SMARTS)
     max_excess = 0
     for ring in rings:
@@ -124,11 +134,41 @@ def _violation_substituent(mol: Chem.Mol) -> float:
     return min(1.0, max_excess / 4.0)
 
 
-def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
-    """计算一对单体的化学规则违反度, 返回 {rule_name: violation_score}。
+# ── 配对级 (4 条) ────────────────────────────────────────
 
-    每个 score ∈ [0, 1], 0 = 完全遵守, 1 = 严重违反。
-    """
+def _violation_solubility(ald: Chem.Mol, amine: Chem.Mol) -> float:
+    try:
+        logp_ald = Crippen.MolLogP(ald)
+        logp_amine = Crippen.MolLogP(amine)
+    except Exception:
+        return 0.0
+    return max(0.0, abs(logp_ald - logp_amine) - 4.0) / 4.0
+
+
+def _violation_rigidity(ald: Chem.Mol, amine: Chem.Mol) -> float:
+    n_rot_ald = Descriptors.NumRotatableBonds(ald)
+    n_rot_amine = Descriptors.NumRotatableBonds(amine)
+    return max(0.0, n_rot_ald - 2) * max(0.0, n_rot_amine - 2) / 16.0
+
+
+def _violation_conjugation(ald: Chem.Mol, amine: Chem.Mol) -> float:
+    ald_arom = sum(1 for a in ald.GetAtoms() if a.GetIsAromatic()) > 0
+    amine_arom = sum(1 for a in amine.GetAtoms() if a.GetIsAromatic()) > 0
+    return 1.0 if (ald_arom != amine_arom) else 0.0
+
+
+def _violation_steric(ald: Chem.Mol, amine: Chem.Mol) -> float:
+    s_ald = _count_steric_neighbors(ald, _ALD_SMARTS)
+    s_amine = _count_steric_neighbors(amine, _AM_SMARTS)
+    total_atoms = ald.GetNumAtoms() + amine.GetNumAtoms()
+    if total_atoms == 0:
+        return 0.0
+    return max(0.0, (s_ald + s_amine) / total_atoms - 0.5) / 0.5
+
+
+# ── 主接口 ────────────────────────────────────────────────
+
+def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
     ald = Chem.MolFromSmiles(ald_smi)
     am = Chem.MolFromSmiles(am_smi)
     if ald is None or am is None:
@@ -143,6 +183,7 @@ def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
     am_topo = _topology(n_ald_am, n_am)
 
     return {
+        "phenyl": max(_violation_phenyl(ald), _violation_phenyl(am)),
         "symmetry": max(
             _violation_symmetry(ald, n_ald, n_am_ald, ald_topo),
             _violation_symmetry(am, n_ald_am, n_am, am_topo),
@@ -151,8 +192,11 @@ def compute_pair_violations(ald_smi: str, am_smi: str) -> Dict[str, float]:
             _violation_para(ald, n_ald, n_am_ald, ald_topo),
             _violation_para(am, n_ald_am, n_am, am_topo),
         ),
-        "rings": max(_violation_rings(ald), _violation_rings(am)),
         "substituent": max(_violation_substituent(ald), _violation_substituent(am)),
+        "solubility": _violation_solubility(ald, am),
+        "rigidity": _violation_rigidity(ald, am),
+        "conjugation": _violation_conjugation(ald, am),
+        "steric": _violation_steric(ald, am),
     }
 
 
@@ -160,18 +204,6 @@ def chem_penalty_loss(preds: torch.Tensor, ald_smiles: List[str],
                       am_smiles: List[str],
                       weights: Dict[str, float] | None = None,
                       threshold: float = 0.5) -> torch.Tensor:
-    """计算批量的化学惩罚损失。
-
-    Args:
-        preds: 模型预测概率 (sigmoid 后), shape (N,)
-        ald_smiles: 醛 SMILES 列表
-        am_smiles: 胺 SMILES 列表
-        weights: 规则权重, 默认 DEFAULT_WEIGHTS
-        threshold: 仅惩罚 pred > threshold 的样本
-
-    Returns:
-        标量惩罚损失 (已对 batch 取平均, 无违规时为 0)
-    """
     w = weights or DEFAULT_WEIGHTS
     violations = []
     for ald, am in zip(ald_smiles, am_smiles):
@@ -180,13 +212,9 @@ def chem_penalty_loss(preds: torch.Tensor, ald_smiles: List[str],
         violations.append(total_v)
 
     v_tensor = torch.tensor(violations, dtype=torch.float32, device=preds.device)
-    # 仅惩罚 pred > threshold 的样本
     mask = (preds > threshold).float()
-    penalty = (mask * v_tensor).mean()
-    return penalty
+    return (mask * v_tensor).mean()
 
-
-# ── 缓存: 预计算训练集所有配对的违反度 ──
 
 class ViolationCache:
     """预计算训练集违反度, 避免每 epoch 重复 RDKit 计算。"""
@@ -195,10 +223,12 @@ class ViolationCache:
                  weights: Dict[str, float] | None = None):
         self.weights = weights or DEFAULT_WEIGHTS
         self.scores: List[float] = []
+        self.details: List[Dict[str, float]] = []
         for ald, am in zip(ald_smiles_list, am_smiles_list):
             v = compute_pair_violations(ald, am)
             total = sum(self.weights.get(k, 0.0) * v.get(k, 0.0) for k in self.weights)
             self.scores.append(total)
+            self.details.append(v)
 
     def to_tensor(self, indices: List[int], device: str = "cpu") -> torch.Tensor:
         return torch.tensor([self.scores[i] for i in indices],
@@ -215,3 +245,14 @@ class ViolationCache:
             "p90": float(np.percentile(arr, 90)),
             "nonzero_frac": float((arr > 0).mean()),
         }
+
+    def rule_summary(self) -> Dict[str, Dict[str, float]]:
+        summary = {}
+        for rule in DEFAULT_WEIGHTS:
+            vals = [d.get(rule, 0.0) for d in self.details]
+            arr = np.array(vals)
+            summary[rule] = {
+                "mean": float(np.mean(arr)),
+                "nonzero_frac": float((arr > 0).mean()),
+            }
+        return summary
