@@ -1,0 +1,50 @@
+# v4 GNN 模型配置 — 缩小模型 + 纯 Focal Loss + batch 支持
+
+featurizer:
+  atom_dim: 37
+  edge_dim: 5
+
+encoder:
+  in_dim: 37
+  hidden_dim: 128
+  num_layers: 3
+  dropout: 0.15
+  jk_pooling: mean
+
+attention:
+  hidden_dim: 128
+  num_heads: 4
+  dropout: 0.15
+
+pooling:
+  hidden_dim: 128
+  pool_dim: 128
+  num_queries: 4
+
+heads:
+  hidden_dim: 128
+  film_head:
+    hidden_dims: [256, 128]
+    dropout: 0.25
+
+loss:
+  focal_alpha: 0.75
+  focal_gamma: 2.0
+
+training:
+  batch_size: 32
+  max_epochs: 200
+  early_stop_patience: 30
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  optimizer: adamw
+  scheduler: cosine
+  warmup_epochs: 5
+  grad_clip: 1.0
+
+evaluation:
+  cv_folds: 5
+  cv_repeats: 3
+
+data:
+  train_csv: data/processed/v4_train.csv
