@@ -1,4 +1,4 @@
-"""v4 Trainer — 简化版训练器，纯 Focal Loss，支持 batch。"""
+"""v5 Trainer — Focal Loss + 规则向量，去掉 chem_penalty。"""
 from __future__ import annotations
 
 import copy
@@ -14,13 +14,14 @@ from src.screening.gnn_v4.v4_loss import FocalLoss
 
 
 class V4Trainer:
-    """v4 模型训练器 — 纯成膜预测，无多任务。"""
+    """v5 训练器 — 纯 Focal Loss (支持连续标签)，规则向量由模型内部处理。"""
 
     def __init__(self, model: nn.Module, loss_fn: FocalLoss,
                  optimizer: torch.optim.Optimizer,
                  lr_scheduler: Any = None,
                  device: str = "cpu", patience: int = 30,
-                 grad_clip: float = 1.0):
+                 grad_clip: float = 1.0,
+                 max_epochs: int = 200):
         self.model = model
         self.loss_fn = loss_fn
         self.optimizer = optimizer
@@ -28,44 +29,39 @@ class V4Trainer:
         self.device = device
         self.patience = patience
         self.grad_clip = grad_clip
+        self.max_epochs = max_epochs
 
         self.best_state = None
         self.best_pr_auc = 0.0
         self.best_epoch = 0
         self.no_improve = 0
+        self.current_epoch = 0
 
-    def _to_device(self, batch: dict) -> tuple[Data, Data, torch.Tensor,
-                                                 torch.Tensor, torch.Tensor,
-                                                 torch.Tensor, int]:
-        ald_data = Data(
-            x=batch["ald_x"].to(self.device),
-            edge_index=batch["ald_edge_index"].to(self.device),
-            edge_attr=batch["ald_edge_attr"].to(self.device),
-        )
-        amine_data = Data(
-            x=batch["amine_x"].to(self.device),
-            edge_index=batch["amine_edge_index"].to(self.device),
-            edge_attr=batch["amine_edge_attr"].to(self.device),
-        )
-        ald_batch = batch["ald_batch"].to(self.device)
-        amine_batch = batch["amine_batch"].to(self.device)
-        batch_size = batch["batch_size"]
-        film_label = batch["film_label"].to(self.device)
-        quality_weight = batch.get("quality_weight")
-        if quality_weight is not None:
-            quality_weight = quality_weight.to(self.device)
-        return ald_data, amine_data, ald_batch, amine_batch, film_label, quality_weight, batch_size
+    def _to_device(self, batch: dict) -> dict:
+        result = {}
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                result[k] = v.to(self.device)
+            else:
+                result[k] = v
+        return result
 
     def train_epoch(self, loader: DataLoader) -> dict[str, float]:
         self.model.train()
         total_loss = 0.0
 
         for batch in loader:
-            ald_data, amine_data, ald_batch, amine_batch, film_label, qw, bs = self._to_device(batch)
+            b = self._to_device(batch)
+            ald_data = Data(x=b["ald_x"], edge_index=b["ald_edge_index"], edge_attr=b["ald_edge_attr"])
+            amine_data = Data(x=b["amine_x"], edge_index=b["amine_edge_index"], edge_attr=b["amine_edge_attr"])
 
             self.optimizer.zero_grad()
-            logits = self.model(ald_data, amine_data, ald_batch, amine_batch, bs)
-            loss = self.loss_fn(logits, film_label, qw)
+            logits = self.model(ald_data, amine_data, b["ald_batch"], b["amine_batch"],
+                                b["batch_size"],
+                                ald_3d=b.get("ald_3d"), amine_3d=b.get("amine_3d"),
+                                dimer_3d=b.get("dimer_3d"),
+                                rule_vec=b.get("rule_vec"))
+            loss = self.loss_fn(logits, b["film_label"], b.get("quality_weight"))
             loss.backward()
 
             if self.grad_clip > 0:
@@ -74,8 +70,8 @@ class V4Trainer:
 
             total_loss += loss.item()
 
-        return {"loss": total_loss / len(loader),
-                "lr": self.optimizer.param_groups[0]["lr"]}
+        n = len(loader)
+        return {"loss": total_loss / n, "lr": self.optimizer.param_groups[0]["lr"]}
 
     @torch.no_grad()
     def validate(self, loader: DataLoader) -> dict[str, float]:
@@ -83,18 +79,25 @@ class V4Trainer:
         all_probs, all_labels = [], []
 
         for batch in loader:
-            ald_data, amine_data, ald_batch, amine_batch, film_label, qw, bs = self._to_device(batch)
-            logits = self.model(ald_data, amine_data, ald_batch, amine_batch, bs)
+            b = self._to_device(batch)
+            ald_data = Data(x=b["ald_x"], edge_index=b["ald_edge_index"], edge_attr=b["ald_edge_attr"])
+            amine_data = Data(x=b["amine_x"], edge_index=b["amine_edge_index"], edge_attr=b["amine_edge_attr"])
+            logits = self.model(ald_data, amine_data, b["ald_batch"], b["amine_batch"],
+                                b["batch_size"],
+                                ald_3d=b.get("ald_3d"), amine_3d=b.get("amine_3d"),
+                                dimer_3d=b.get("dimer_3d"),
+                                rule_vec=b.get("rule_vec"))
             probs = torch.sigmoid(logits)
-
             all_probs.extend(probs.cpu().tolist())
-            all_labels.extend(film_label.cpu().tolist())
+            all_labels.extend(b["film_label"].cpu().tolist())
 
-        pr_auc = average_precision_score(all_labels, all_probs) if len(set(all_labels)) > 1 else 0.0
+        bin_labels = [1 if l >= 0.5 else 0 for l in all_labels]
+        pr_auc = average_precision_score(bin_labels, all_probs) if len(set(bin_labels)) > 1 else 0.0
         return {"pr_auc": pr_auc}
 
     def step(self, train_loader: DataLoader, val_loader: DataLoader,
              epoch: int) -> dict[str, float]:
+        self.current_epoch = epoch
         train_m = self.train_epoch(train_loader)
         val_m = self.validate(val_loader)
 

@@ -46,5 +46,10 @@ evaluation:
   cv_folds: 5
   cv_repeats: 3
 
+model:
+  use_3d: true
+  monomer_3d_dim: 10
+  dimer_3d_dim: 10
+
 data:
-  train_csv: data/processed/v4_train.csv
+  train_csv: data/processed/v5_train_stage1.csv
