@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class FilmHead(nn.Module):
@@ -29,7 +30,10 @@ class FilmHead(nn.Module):
             in_dim += dim_3d
         if use_rules:
             in_dim += dim_rules
+        self.use_3d = use_3d
+        self.dim_3d = dim_3d
         self.use_rules = use_rules
+        self.dim_rules = dim_rules
         self.norm = nn.LayerNorm(in_dim)
         self.mlp = nn.Sequential(
             nn.Linear(in_dim, 256),
@@ -46,9 +50,15 @@ class FilmHead(nn.Module):
                 emb_3d: torch.Tensor | None = None,
                 rule_vec: torch.Tensor | None = None) -> torch.Tensor:
         parts = [ea, eb, ea * eb, e_pair]
-        if emb_3d is not None:
+        if self.use_3d:
+            if emb_3d is None:
+                emb_3d = torch.zeros(ea.shape[0], self.dim_3d,
+                                     device=ea.device, dtype=ea.dtype)
             parts.append(emb_3d)
-        if rule_vec is not None and self.use_rules:
+        if self.use_rules:
+            if rule_vec is None:
+                rule_vec = torch.zeros(ea.shape[0], self.dim_rules,
+                                       device=ea.device, dtype=ea.dtype)
             parts.append(rule_vec)
         h = torch.cat(parts, dim=-1)
         h = self.norm(h)

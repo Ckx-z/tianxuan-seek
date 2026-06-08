@@ -51,6 +51,8 @@ class V4Trainer:
         total_loss = 0.0
 
         for batch in loader:
+            if batch is None:
+                continue
             b = self._to_device(batch)
             ald_data = Data(x=b["ald_x"], edge_index=b["ald_edge_index"], edge_attr=b["ald_edge_attr"])
             amine_data = Data(x=b["amine_x"], edge_index=b["amine_edge_index"], edge_attr=b["amine_edge_attr"])
@@ -79,6 +81,8 @@ class V4Trainer:
         all_probs, all_labels = [], []
 
         for batch in loader:
+            if batch is None:
+                continue
             b = self._to_device(batch)
             ald_data = Data(x=b["ald_x"], edge_index=b["ald_edge_index"], edge_attr=b["ald_edge_attr"])
             amine_data = Data(x=b["amine_x"], edge_index=b["amine_edge_index"], edge_attr=b["amine_edge_attr"])
